@@ -17,7 +17,7 @@ enum PackageUpgradeFixtures {
                 primaryConfirmation: .userConfirmed)
         }
         let model = ShowDocumentModel(show: Show(title: title), speakers: speakers,
-            episodes: [Episode(title: "Generated Episode", sources: [source], speakerAssignments: assignments)])
+            episodes: [Episode(title: "\(title) Episode", sources: [source], speakerAssignments: assignments)])
         return try ShowPackageCoder().encode(model, revision: 1)
     }
 }

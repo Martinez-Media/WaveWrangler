@@ -32,6 +32,8 @@ recovery work so **Don't Save** finishes discarding unsaved checkpoints.
 ## When a save fails
 
 Keep the document open and inspect the status action.
+With macOS **Keyboard navigation** enabled, use **Tab** to reach persistent
+recovery actions and **Space** to activate them.
 
 | Status | What to do |
 | --- | --- |

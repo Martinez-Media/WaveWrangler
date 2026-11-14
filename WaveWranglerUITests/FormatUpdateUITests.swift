@@ -81,7 +81,7 @@ final class FormatUpdateUITests: XCTestCase {
             check(Acceptance.waitFor(timeout: 5) { self.value(status).hasPrefix("Read-only") }, "status Read-only: \(value(status))")
             window.buttons["ww.sidebar.episode"].click()
             let title = window.textFields["ww.inspector.episode.title"]
-            check(title.waitForExistence(timeout: 5) && title.value as? String == "Generated Episode"
+            check(title.waitForExistence(timeout: 5) && title.value as? String == "Mixed Show Episode"
                   && window.title.contains("Mixed Show"), "the older content is shown: \(title.value ?? "nil")")
             check(!title.isEnabled, "the title can't be edited")
             app.menuBars.menuBarItems["File"].click()
@@ -129,19 +129,20 @@ final class FormatUpdateUITests: XCTestCase {
             check((try? ShowStorage.read(document)) == original, "the original file is byte-unchanged")
             let tryAgain = bar.buttons["Try Again"], details = bar.buttons["Show Details"]
             check(tryAgain.exists && details.exists, "Try Again and Show Details: \(bar.buttons.allElementsBoundByIndex.map(\.title))")
+            check(tryAgain.isEnabled && details.isEnabled, "recovery actions are enabled")
             try audit("T21 D15 failure bar")
             // Keyboard navigation of buttons depends on the host's Full Keyboard Access setting.
             activate(tryAgain, step: "D15 Tab/Space to Try Again")
             Thread.sleep(forTimeInterval: 2)
             check(bar.exists && (try? ShowStorage.read(document)) == original, "Try Again fails again, original unchanged")
             activate(details, step: "D15 Tab/Space to Show Details")
-            let detailsSheet = app.sheets.firstMatch
+            let detailsSheet = window.sheets.firstMatch
             check(detailsSheet.waitForExistence(timeout: 5), "Show Details explains the failure")
             check(texts(in: detailsSheet).contains { $0.contains("simulated failure") && $0.contains("The original file is unchanged.") },
                   "details text: \(texts(in: detailsSheet))")
             try audit("T21 D15 details")
             app.typeKey(.return, modifierFlags: [])
-            check(Acceptance.waitFor(timeout: 5) { !self.app.sheets.firstMatch.exists }, "Return dismisses the details")
+            check(Acceptance.waitFor(timeout: 5) { !detailsSheet.exists }, "Return dismisses the details")
         }
     }
 
@@ -186,35 +187,53 @@ final class FormatUpdateUITests: XCTestCase {
         }
     }
 
-    /// Several older shows opened as tabs (#175 review; the package-v1→v2 upgrade path, as at a state-restored launch): each
-    /// show asks once, on its own tab, when that tab is selected; none is lost for being a background tab.
-    func testT21EachTabbedOlderShowAsksWhenSelected() throws {
-        let first = try writeOlder("First Tab", PackageUpgradeFixtures.statedChannels)
-        let second = try writeOlder("Second Tab", PackageUpgradeFixtures.mixed)
+    /// Each older show asks once in its own episode window. Opening another show must not launch a second app.
+    func testT21EachOlderShowAsksOnceInTheSameApplication() async throws {
+        let first = try writeOlder("First Show", PackageUpgradeFixtures.statedChannels)
+        let second = try writeOlder("Second Show", PackageUpgradeFixtures.mixed)
         let originals = [first: try ShowStorage.read(first), second: try ShowStorage.read(second)]
-        try task("T21-tabs") {
-            launch(["-WWUITestAutosave", "ON", "-WWUITestResetStorage", "YES"], opening: first)
-            check(app.windows.matching(identifier: "ww.show.window").firstMatch.waitForExistence(timeout: 10), "the first show opens")
-            // Open the second before answering the first: it opens as the selected tab, the first goes to the background.
-            app.open(second)
-            var asked: [String] = []
-            for _ in 0..<6 where asked.count < 2 {
-                let sheet = app.sheets.firstMatch
-                if sheet.waitForExistence(timeout: 5) {
-                    let title = texts(in: sheet).first { $0.hasPrefix("Update “") } ?? "?"
-                    asked.append(title)
-                    app.typeKey("r", modifierFlags: .command)   // Open Read-Only: nothing is written
-                    _ = Acceptance.waitFor(timeout: 5) { !self.app.sheets.firstMatch.exists }
+        launch(["-WWUITestAutosave", "ON", "-WWUITestResetStorage", "YES"], opening: first)
+        XCTAssertTrue(app.windows.matching(identifier: "ww.show.window").firstMatch.waitForExistence(timeout: 10))
+        let running = NSRunningApplication.runningApplications(withBundleIdentifier: "com.brandonmartinez.wavewrangler")
+        XCTAssertEqual(running.count, 1, "The initial document opens in one app process.")
+        let application = try XCTUnwrap(running.first)
+        let applicationURL = try XCTUnwrap(application.bundleURL)
+        let processIdentifier = application.processIdentifier
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.createsNewApplicationInstance = false
+        configuration.activates = true
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            NSWorkspace.shared.open([second], withApplicationAt: applicationURL, configuration: configuration) { opened, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else if opened?.processIdentifier == processIdentifier {
+                    continuation.resume()
                 } else {
-                    app.typeKey("\t", modifierFlags: .control)   // Window › Show Next Tab
+                    continuation.resume(throwing: NSError(domain: "FormatUpdate", code: 2,
+                        userInfo: [NSLocalizedDescriptionKey: "Opening the second document launched another app process."]))
                 }
             }
-            Acceptance.record(self, "T21 tabs asked: \(asked)")
-            check(Set(asked) == ["Update “First Tab” to the current format?", "Update “Second Tab” to the current format?"]
-                  && asked.count == 2, "each tabbed show asks exactly once: \(asked)")
-            // Selecting each tab again never asks a second time.
-            app.typeKey("\t", modifierFlags: .control)
-            check(!app.sheets.firstMatch.waitForExistence(timeout: 3), "no second prompt after Open Read-Only")
+        }
+        try task("T21-windows") {
+            check(Acceptance.waitFor(timeout: 10) {
+                self.app.windows.matching(identifier: "ww.show.window").count == 2
+            }, "both shows remain open in the same app")
+            var asked: [String] = []
+            for showTitle in ["Mixed Show", "Stated Show"] {
+                let window = try selectShowWindow(showTitle)
+                let sheet = window.sheets.firstMatch
+                check(sheet.waitForExistence(timeout: 5), "\(showTitle) presents its update prompt")
+                asked.append(texts(in: sheet).first { $0.hasPrefix("Update “") } ?? "?")
+                window.typeKey("r", modifierFlags: .command)
+                check(Acceptance.waitFor(timeout: 5) { !sheet.exists }, "\(showTitle) dismisses its prompt")
+            }
+            Acceptance.record(self, "T21 windows asked: \(asked)")
+            check(Set(asked) == ["Update “First Show” to the current format?", "Update “Second Show” to the current format?"]
+                  && asked.count == 2, "each show asks exactly once: \(asked)")
+            for showTitle in ["Mixed Show", "Stated Show"] {
+                let window = try selectShowWindow(showTitle)
+                check(!window.sheets.firstMatch.waitForExistence(timeout: 3), "\(showTitle) never asks again after Open Read-Only")
+            }
             for (url, original) in originals {
                 check((try? ShowStorage.read(url)) == original, "\(url.lastPathComponent) is byte-unchanged")
             }
@@ -277,6 +296,24 @@ final class FormatUpdateUITests: XCTestCase {
 
     // MARK: - Helpers
 
+    private func selectShowWindow(_ showTitle: String) throws -> XCUIElement {
+        app.menuBars.menuBarItems["Window"].click()
+        let item = app.menuBars.menuItems.matching(
+            NSPredicate(format: "title CONTAINS %@", "\(showTitle) Episode")).firstMatch
+        guard item.waitForExistence(timeout: 5) else {
+            throw NSError(domain: "FormatUpdate", code: 3,
+                userInfo: [NSLocalizedDescriptionKey: "\(showTitle) is missing from the Window menu."])
+        }
+        item.click()
+        let window = app.windows.matching(identifier: "ww.show.window").matching(
+            NSPredicate(format: "title CONTAINS %@", showTitle)).firstMatch
+        guard window.waitForExistence(timeout: 5) else {
+            throw NSError(domain: "FormatUpdate", code: 4,
+                userInfo: [NSLocalizedDescriptionKey: "\(showTitle) window did not appear."])
+        }
+        return window
+    }
+
     private func launch(_ arguments: [String], opening document: URL) {
         app = XCUIApplication()
         app.launchArguments = ["-ApplePersistenceIgnoreState", "YES", "-WWUITestHooks", "YES", "-WWUITestResetPreferences", "YES",
@@ -327,8 +364,11 @@ final class FormatUpdateUITests: XCTestCase {
     }
 
     private func tabTo(_ target: XCUIElement, limit: Int = 40) -> Bool {
-        for _ in 0..<limit {
-            if target.exists, target.value(forKey: "hasKeyboardFocus") as? Bool == true { return true }
+        for step in 0..<limit {
+            if target.exists, target.value(forKey: "hasKeyboardFocus") as? Bool == true {
+                Acceptance.record(self, "\(target.label) reached after \(step) Tab presses")
+                return true
+            }
             app.typeKey("\t", modifierFlags: [])
         }
         return target.exists && target.value(forKey: "hasKeyboardFocus") as? Bool == true
@@ -336,7 +376,9 @@ final class FormatUpdateUITests: XCTestCase {
 
     private func activate(_ target: XCUIElement, step: String) {
         if Self.keyboardNavigation {
-            check(tabTo(target), "\(step): Tab reaches \(target.title)")
+            let reached = tabTo(target)
+            check(reached, "\(step): Tab reaches \(target.label)")
+            guard reached else { return }
             app.typeKey(" ", modifierFlags: [])
         } else {
             needsKeyboardNavigation.append("\(step) (Not run; needs Full Keyboard Access)")

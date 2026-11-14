@@ -1,6 +1,6 @@
 import Foundation
 
-/// #159 (D14/D15): an older-format show (schema 1) is shown upgraded in memory and stays read-only until the C5
+/// #159 (D14/D15): a version-1 show package is shown in memory and stays read-only until the C5
 /// migration has published its update. Pure, so the unhosted unit tests compile it (see `FormatUpdateTests`).
 enum FormatUpdateState: Equatable, Sendable {
     /// D14: waiting for the user to update (the sheet, or Open Read-Only).

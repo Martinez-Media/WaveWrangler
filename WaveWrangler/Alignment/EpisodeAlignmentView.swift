@@ -852,9 +852,17 @@ enum AlignmentKeyHandler {
         if let view = window.firstResponder as? NSView, let role = view.accessibilityRole(),
            controls.contains(role) { return true }
         if window.isKeyWindow,
-           let element = NSApp.accessibilityFocusedUIElement as? any NSAccessibilityProtocol,
-           let role = element.accessibilityRole(), controls.contains(role) { return true }
+           let role = accessibilityRole(of: NSApp.accessibilityFocusedUIElement), controls.contains(role) { return true }
         return false
+    }
+
+    private static func accessibilityRole(of element: Any?) -> NSAccessibility.Role? {
+        if let element = element as? any NSAccessibilityProtocol { return element.accessibilityRole() }
+        // SwiftUI accessibility nodes implement the public selector without adopting the formal protocol.
+        let selector = #selector(NSAccessibilityProtocol.accessibilityRole)
+        guard let object = element as? NSObject, object.responds(to: selector),
+              let value = object.perform(selector)?.takeUnretainedValue() as? String else { return nil }
+        return NSAccessibility.Role(rawValue: value)
     }
 
     private static func isInside(_ identifier: String, responder: NSResponder?) -> Bool {

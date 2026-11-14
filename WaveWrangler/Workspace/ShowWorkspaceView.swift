@@ -26,6 +26,8 @@ private struct ShowWindowContent: View {
                    model.episodeID == state.selectedEpisodeID {
                     EpisodeControlBar(model: model, state: state, width: max(0, geometry.size.width - 24))
                 }
+                // Window-level recovery actions must stay outside the editor/inspector focus subtree.
+                ShowMessageBar(state: state)
                 // The hand-built split keeps content and inspector reachable in a 760-wide window (T-M2-01).
                 // Switching this branch on the destination re-enters AppKit's constraint update and aborts,
                 // so every destination uses it, and the inspector stays narrow enough for the Sources table
@@ -92,9 +94,6 @@ private struct ShowWindowContent: View {
     private var core: some View {
         ShowDetailContent(state: state)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .safeAreaInset(edge: .top, spacing: 0) {
-            ShowMessageBar(state: state)
-        }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button("Library", systemImage: "books.vertical") {

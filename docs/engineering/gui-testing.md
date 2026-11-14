@@ -34,6 +34,14 @@ Deferral is not a pass, waiver or weaker threshold. Full Keyboard Access,
 VoiceOver and guest permissions remain separate setup requirements.
 Real-speech/model, soak and screenshot tests have their own opt-ins.
 
+For keyboard failures, preserve the actual input branch, effective Full Keyboard
+Access, key window and focused public accessibility role. A SwiftUI accessibility
+element may expose that role without formally adopting `NSAccessibilityProtocol`;
+failed conformance does not authorize a timeline monitor to consume its Space key.
+Window-level recovery bars belong beside the window controls, outside the
+editor/inspector focus subtree. Check their real Tab/Space traversal after a
+dynamic failure, not just button existence, enabled state or default-key success.
+
 `python3 scripts/test-ui-plans.py --static` verifies inventory and coverage.
 Without `--static`, the checker also exercises CLI routing using stand-ins
 without launching an app. `--products` checks generated plan metadata/products.
