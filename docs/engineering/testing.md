@@ -37,13 +37,17 @@ only the final Xcode test step; it is not a shortcut around heavy package checks
 For a focused package regression:
 
 ```sh
+SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH=2 \
 swift test --package-path Packages/WaveWranglerKit \
   --scratch-path .build/swiftpm --jobs 2 --filter '<Suite>/<test>'
 ```
 
 Use the real suite/function selector and the opt-in environment required by
-that suite. Prefer combining related selectors in one runner rather than
-launching overlapping builds. The wrapper's specialized passes matter:
+that suite. Verify that required selected identities actually executed; an
+exit-0 empty selection or required-test skip is not a runtime pass. Ordinary
+passes intentionally skip separately admitted heavy suites. Prefer combining
+related selectors in one runner rather than launching overlapping builds.
+The wrapper's specialized passes matter:
 `WW_ESTIMATOR_TESTS`, `WW_SEGMENT_TESTS`, `WW_PIPELINE_HEAVY_TESTS` and
 `WW_TIMING_TESTS` are not blanket permission to run unrelated experiments.
 Inspect `scripts/test.sh` for the maintained selectors and pass order.
@@ -140,6 +144,14 @@ Add a few focused cases that fail without the change. Check meaningful output,
 refusal and cancellation rather than restating constants or private helpers.
 Use temporary directories and generated PCM; keep media grants explicit even
 in tests.
+
+Use explicit admission handshakes and bounded monotonic deadlines for async
+ordering tests; task creation or one yield does not establish admission order.
+Swift Testing `.serialized` serializes suite contents, not unrelated suites in
+the same process. For native readiness, prefer state/focus predicates while
+preserving intentional observation windows for no-retry/no-write behavior.
+See [end-of-feature review](feature-review.md) for evidence classification and
+changed-contract review.
 
 Persistence changes need independently specified envelopes/migrations and
 unknown-newer refusal, not only a same-code roundtrip. Audible edits need exact
