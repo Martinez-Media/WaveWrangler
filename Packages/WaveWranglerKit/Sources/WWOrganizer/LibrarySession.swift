@@ -206,6 +206,7 @@ extension LibraryModel {
 
         result.collections = Self.diffCollections(current: result.collections, from: from.collections, to: to.collections, moved: moved)
         let entryIDs = Set(result.entries.map(\.showID))
+        result.recentShowIDs.removeAll { !entryIDs.contains($0) }
         for index in result.collections.indices {
             result.collections[index].showIDs.removeAll { !entryIDs.contains($0) }
         }

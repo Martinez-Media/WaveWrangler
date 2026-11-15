@@ -113,6 +113,28 @@ struct LibrarySessionTests {
         #expect(session.library.entry(fresh)?.lastKnownTitle == "New show", "a new show is never dropped")
     }
 
+    @Test func redoRemovalPrunesRecentAddedAfterUndo() throws {
+        let victim = ShowID(), other = ShowID(), last = ShowID()
+        let initial = LibraryModel(
+            entries: [victim, other, last].map { LibraryShowEntry(showID: $0, lastKnownTitle: "Show") },
+            recentShowIDs: [other, last]
+        )
+        var session = LibrarySession()
+        _ = session.didLoad(initial, allowsEdits: true)
+        let change = try #require(try session.apply(allowsEdits: true) { library throws(LibraryError) in
+            try library.removingEntries([victim])
+        })
+        session.undo(change)
+        _ = session.record(.opened(victim, confirmedTitle: "Show", provisionalTitle: "Show"), allowsEdits: true)
+        #expect(session.library.recentShowIDs == [victim, other, last])
+        session.redo(change)
+        #expect(session.library.entry(victim) == nil)
+        #expect(session.library.recentShowIDs == [other, last])
+        // The same difference is also applied to the newer canonical library during publication.
+        let canonical = initial.recordingOpened(victim)
+        #expect(change.apply(to: canonical) == session.library)
+    }
+
     @Test func flushReportsItemsSoStorageAppliesTheSameBookkeeping() {
         var session = LibrarySession()
         _ = session.didLoad(stored, allowsEdits: true)

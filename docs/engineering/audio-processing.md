@@ -4,6 +4,9 @@ Rendering consumes authorized source buffers and explicit timing/processing
 recipes. Waveform appearance, acoustic proposals and cached PCM never grant
 permission or redefine clocks. See [program timeline](program-timeline.md)
 for exact coordinate and clip-edit rules.
+Waveform speaker grouping and speakers-only filtering compute confirmed-source
+eligibility once per calculation, preserving assignment order and measured channel
+rules without retaining a permission or presentation cache.
 
 ## Source, aligned and production audio
 
@@ -32,6 +35,20 @@ Adaptive rendering uses one multichannel native TimePitch at zero pitch, retaini
 channel relationships. Processing is bounded and region-anchored (12-second
 regions plus context/crossfades), with five-second versioned cache tiles.
 Estimated timing remains visibly distinguishable from measured support.
+Affine listening PCM asset revision 2 uses a versioned SHA-256 digest of canonical
+map/format/recipe metadata instead of embedding the entire map in each recipe name.
+The shared coordinator holds at most 64 disposable slots, 64 full keys, 64 recipe
+names and 64 active disposable consumers. Affine tile preparation retains ownership through
+the exact-key `readyPayload` copy and decoding; unfinished jobs and live
+ready/running upstream dependencies also pin metadata. Final release retires
+unreferenced slots, candidates, invalidation records and recipe registrations,
+not normally verified cache files. Explicitly invalidated tile files must be
+removed before their refusal records retire. Another ready owner, unfinished job,
+or non-invalidated ordinary state/history candidate pins those files. Removal failure retains bounded refusal metadata, publishes
+failure and propagates to the consumer for retry; it cannot revive the old payload.
+A full pinned budget refuses visibly before registering new work;
+releasing/invalidation permits retry. Ordinary canonical derived slots
+and their Undo/Redo candidate history are not subject to this disposable policy.
 See [automatic alignment](automatic-alignment.md) for admission/provenance.
 
 ## Formats, routing and effects
@@ -137,6 +154,10 @@ AVFAudio engine lock. Extrapolation is clamped to scheduled samples. The
 one-shot watchdog targets low-water/end boundaries with a 50 ms maximum
 snapshot interval and shorter terminal/startup retries; refill/starvation
 decisions still use a fresh device observation.
+Source-meter reads use the same immutable snapshot. The existing output-queue
+watchdog publishes heard-frame meter state; gain/exclusion/reset/Stop mutations
+publish in queue order. Meter computation stays queue-owned, while UI polling no
+longer waits for AVFAudio work. Reset and Stop remain synchronous barriers.
 
 Reuse full 512-frame planar output buffers only after their `.dataPlayedBack`
 token completes. The queue-owned pool caps at 50 buffers (200 KiB of samples);

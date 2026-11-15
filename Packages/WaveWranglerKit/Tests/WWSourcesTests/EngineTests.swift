@@ -1301,6 +1301,79 @@ struct ForbiddenAPITests {
 
 @Suite("Duplicated shows keep separate device access")
 struct DuplicatedShowTests {
+    @Test @MainActor func supersededRefreshCannotReplaceCurrentObservationWithFailure() async throws {
+        let tree = try SyntheticTree(label: "refresh-currency")
+        var rng = SplitMix64(seed: 12)
+        let store = InMemoryDeviceAccessStore()
+        let (original, _, context) = try await makeOriginalAndCopy(store: store, tree: tree, rng: &rng)
+        try FileManager.default.moveItem(at: tree.sources.appendingPathComponent("take.wav"),
+            to: tree.sources.appendingPathComponent("moved.wav"))
+        let monitor = SourceAvailabilityMonitor(showID: original.showID, store: store, context: context, setting: .off)
+        let gate = AsyncGate()
+        await gate.arm()
+        monitor.evaluatorTaskDidStart = { await gate.pass() }
+        let older = Task { await monitor.refresh([original.sourceID]) }
+        guard await gate.waitUntilEntered(limit: .seconds(5)) else {
+            await gate.release()
+            await older.value
+            Issue.record("Older refresh did not enter")
+            await monitor.stop()
+            return
+        }
+        monitor.evaluatorTaskDidStart = nil
+        await monitor.refresh([original.sourceID])
+        let current = monitor.observations[original.sourceID]
+        let snapshot = await store.snapshot(for: original.key)
+        #expect(current?.access == .granted)
+        await gate.release()
+        await older.value
+        #expect(monitor.refreshFailures[original.sourceID] == nil)
+        #expect(monitor.observations[original.sourceID] == current)
+        #expect(await store.snapshot(for: original.key) == snapshot)
+        await monitor.stop()
+    }
+
+    @Test @MainActor func lateBookmarkRefreshDoesNotRestoreOrOverwriteGrant() async throws {
+        for fileBacked in [false, true] {
+            for mutation in ["remove", "relink", "stop"] {
+                let tree = try SyntheticTree(label: "late-refresh")
+                var rng = SplitMix64(seed: 12)
+                let store: any DeviceAccessConditionalStore = fileBacked
+                    ? FileDeviceAccessStore(fileURL: tree.root.appendingPathComponent("store.json"))
+                    : InMemoryDeviceAccessStore()
+                let (original, _, context) = try await makeOriginalAndCopy(store: store, tree: tree, rng: &rng)
+                let moved = tree.sources.appendingPathComponent("moved.wav")
+                try FileManager.default.moveItem(at: tree.sources.appendingPathComponent("take.wav"), to: moved)
+                let monitor = SourceAvailabilityMonitor(showID: original.showID, store: store, context: context, setting: .off)
+                let gate = AsyncGate()
+                await gate.arm()
+                monitor.evaluatorTaskDidStart = { await gate.pass() }
+                let refresh = Task { await monitor.refresh([original.sourceID]) }
+                let entered = await gate.waitUntilEntered(limit: .seconds(5))
+                if !entered {
+                    await gate.release()
+                    await refresh.value
+                    Issue.record("Evaluator did not enter")
+                    continue
+                }
+                switch mutation {
+                case "remove": try await store.removeRecord(for: original.key)
+                case "relink":
+                    var newer = original
+                    newer.lastKnownPath = "/newer"
+                    try await store.save(newer)
+                default: await monitor.stop()
+                }
+                let expected = try await store.snapshot(for: original.key)
+                await gate.release()
+                await refresh.value
+                #expect(try await store.snapshot(for: original.key) == expected)
+                #expect(monitor.observations[original.sourceID] == nil)
+                if mutation != "stop" { #expect(monitor.refreshFailures[original.sourceID] != nil) }
+                await monitor.stop()
+            }
+        }
+    }
     /// A File ▸ Duplicate copy keeps the source IDs but gets a new ShowID.
     func makeOriginalAndCopy(store: any DeviceAccessStore, tree: SyntheticTree, rng: inout SplitMix64) async throws -> (original: DeviceAccessRecord, copy: DeviceAccessRecord, context: SourceAccessContext) {
         let file = try tree.file("take.wav", bytes: 32, rng: &rng)

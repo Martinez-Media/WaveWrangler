@@ -14,6 +14,8 @@ Each editor remains bound to its episode. Windows for the same show share its
 document, Save state, and Undo history. **Close Show** closes the show through
 the normal unsaved-changes decision. Removing a show from Library is not the
 same as deleting its document or source recordings.
+Removal also removes that show's Recent entry, including when you undo removal,
+open the show and then redo removal. Other Recents keep their order.
 
 ![Library and episode management](../assets/screenshots/library.png)
 
@@ -68,6 +70,10 @@ Select the recording and follow its status action: **Grant Access**, **Try Again
 or **Relink Source**, as appropriate. Relinking compares the selected file before
 you confirm it. Changed sources can invalidate timing, transcripts, and edits;
 do not substitute an unrelated file simply to clear a warning.
+If undoing a relink fails, the relink remains applied and the error is shown.
+Resolve a storage failure and retry Undo; a subsequently changed grant requires
+review rather than being overwritten. The failed inverse does not offer an
+invalid Redo, and reoffering Undo can clear earlier Redo history.
 
 See [Alignment](alignment.md) for timing and
 [Saving and recovery](saving-and-recovery.md) for document and access recovery.

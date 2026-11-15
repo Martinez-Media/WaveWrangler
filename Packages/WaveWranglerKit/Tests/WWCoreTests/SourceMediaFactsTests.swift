@@ -53,6 +53,9 @@ struct SourceMediaFactsTests {
         SourceObservations(sampleRate: .known(0)),
     ]) func invalidMeasurementsCannotEnterCanonicalState(_ observations: SourceObservations) {
         #expect(!observations.isValid)
+        let source = SourceRecord(displayNameHint: "Generated", observations: observations)
+        let model = ShowDocumentModel(show: Show(title: "Generated"), episodes: [Episode(title: "Episode", sources: [source])])
+        #expect(model.validationIssues().contains { $0.code == .invalidSourceMediaFacts })
     }
 
     @Test func observedChannelCountCannotCorruptAStoredInputGain() throws {

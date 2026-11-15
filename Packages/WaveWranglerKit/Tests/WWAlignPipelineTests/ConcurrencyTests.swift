@@ -11,6 +11,29 @@ import WWTimeMap
 /// otherwise publish.
 @Suite("Late results never publish; cancellation and shutdown are coherent; work is bounded")
 struct ConcurrencyTests {
+    @Test func cancellationInsideEstimatorReleasesAdmissionAndAllowsRetry() async throws {
+        let checkpoints = Box(0)
+        var hooks = AlignmentPipelineTestHooks()
+        hooks.didReachEstimatorCheckpoint = {
+            let shouldCancel = checkpoints.update { count in count += 1; return count == 5 }
+            if shouldCancel { withUnsafeCurrentTask { $0?.cancel() } }
+        }
+        let fixture = try await PipelineFixture(Self.short(), hooks: hooks, label: "cancel-estimator")
+        let target = fixture.epochs[1]
+        let start = ContinuousClock.now
+        let report = try await fixture.analyze(preferredReference: "ref")
+        #expect(checkpoints.value == 5)
+        #expect(report.epochFailures[target] == .canceled)
+        #expect(report.records[target] == nil)
+        await Self.expectQuiescent(fixture)
+        #expect(start.duration(to: .now) < .seconds(10))
+        let retry = try await fixture.analyze(preferredReference: "ref")
+        let result = try #require(retry.analyses[target])
+        #expect(result.outcome == .published(result.key))
+        await Self.expectQuiescent(fixture)
+        await fixture.pipeline.shutdown()
+    }
+
     /// A short two-recorder episode (renders in a few seconds).
     static func short() -> [GroupSpec] { TwoRecorder.groups(referenceSeconds: 6, targetSeconds: 4) }
 

@@ -5,6 +5,40 @@ import WWCore
 
 @Suite("Conditional import access publication", .serialized)
 struct DeviceAccessImportTests {
+    @Test func conditionalReplacementRejectsRemovalABAAndForeignSnapshots() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("ww-replace-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = record()
+        let stores: [any DeviceAccessConditionalStore] = [
+            InMemoryDeviceAccessStore([source]), FileDeviceAccessStore(fileURL: root.appendingPathComponent("access.json"))
+        ]
+        for store in stores {
+            if try await store.record(for: source.key) == nil { try await store.save(source) }
+            let before = try #require(try await store.snapshot(for: source.key))
+            var refreshed = source
+            refreshed.lastBookmarkRefreshAt = Date(timeIntervalSince1970: 200)
+            let after = try #require(try await store.replace(refreshed, matching: before))
+            #expect(after.mutationGeneration != nil)
+            await #expect(throws: DeviceAccessConditionalError.changed(source.key)) {
+                try await store.replace(source, matching: before)
+            }
+            try await store.removeRecord(for: source.key)
+            await #expect(throws: DeviceAccessConditionalError.changed(source.key)) {
+                try await store.replace(refreshed, matching: after)
+            }
+            try await store.save(refreshed)
+            let current = try await store.snapshot(for: source.key)
+            await #expect(throws: DeviceAccessConditionalError.changed(source.key)) {
+                try await store.replace(source, matching: after)
+            }
+            #expect(try await store.snapshot(for: source.key) == current)
+            let foreign = try #require(await InMemoryDeviceAccessStore([refreshed]).snapshot(for: source.key))
+            await #expect(throws: DeviceAccessConditionalError.changed(source.key)) {
+                try await store.replace(nil, matching: foreign)
+            }
+            #expect(try await store.snapshot(for: source.key) == current)
+        }
+    }
     @Test func mutationRevisionsDetectRevocationAndEqualRecordRestoration() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("ww-access-revision-\(UUID())")
         defer { try? FileManager.default.removeItem(at: root) }

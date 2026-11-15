@@ -1,15 +1,15 @@
 {
   "version": 1,
-  "date": "2026-11-13",
-  "basedOn": "70c735537bf667cb512cba0f0b04481e74208d9d",
-  "reason": "Current checkout maintenance baseline after relocating immutable qualification artifacts out of documentation and updating live test lookups and source comments. Historical freeze bytes, hashes, seeds, gates and pinnedTrees remain unchanged. This is not new DSP qualification; historical holdouts still refuse changed historical trees.",
+  "date": "2026-11-14",
+  "basedOn": "958c51c81b150b6716b341a2e0949b8bed867776",
+  "reason": "Current estimator maintenance trees include synchronous interruption checkpoints and unchanged-result regression coverage. Historical freeze bytes, hashes, seeds, gates and pinnedTrees remain unchanged. This is not new DSP qualification; historical holdouts still refuse changed historical trees.",
   "records": {
     "m2-freeze-estimator-2": {
       "historicalRecord": "test-support/qualification/m2/fixtures/m2-freeze-estimator-2.json",
       "historicalRecordSHA256": "94aea7e220c0d319ec9d50c1ab3e05d0c2dc7a2a5090504ed826e66f1cd32667",
       "currentTrees": {
-        "Sources/WWAlignEstimate": "d8db7ea66b32b00f2940f60370d5008eb072da71",
-        "Tests/WWAlignEstimateTests": "ea3b637783b662209d82a24f75843fed71230e38"
+        "Sources/WWAlignEstimate": "0635c3d56f7bac378d7dc7a59aaac0b973a623bc",
+        "Tests/WWAlignEstimateTests": "bfe33fcd10846d86728124dd8aeb5b83cce8efcb"
       }
     },
     "m2-freeze-discontinuity-2": {

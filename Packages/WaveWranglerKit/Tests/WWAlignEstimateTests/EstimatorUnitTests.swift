@@ -6,6 +6,21 @@ import WWTimeMap
 
 @Suite("Estimator inputs and primitives")
 struct EstimatorUnitTests {
+    @Test func synchronousInterruptionStopsDuringProxyConstructionWithoutChangingResults() throws {
+        let reference = try Self.track(), target = try Self.track()
+        let request = EstimationRequest(reference: reference, tracks: [target], search: try SearchRange(maximumDeviationSeconds: 1))
+        let original = try AcousticEstimator.estimate(request)
+        var checks = 0
+        #expect(throws: AlignEstimateError.interrupted) {
+            try AcousticEstimator.estimate(request, isInterrupted: {
+                checks += 1
+                return checks == 5
+            })
+        }
+        #expect(checks == 5)
+        let uninterrupted = try AcousticEstimator.estimate(request, isInterrupted: { false })
+        #expect(uninterrupted == original)
+    }
     static func track(_ samples: [Float] = [Float](repeating: 0.1, count: 80_000), rate: Int = 8000, group: RecorderGroupID = RecorderGroupID(), epoch: RecordingEpochID = RecordingEpochID(), overlap: Range<Int>? = nil) throws -> EstimatorTrack {
         EstimatorTrack(group: group, epoch: epoch, occurrence: SourceOccurrenceID(), buffer: try SampleBuffer(samples: samples, sampleRate: rate), declaredOverlap: overlap)
     }
@@ -186,11 +201,11 @@ struct EstimatorUnitTests {
         var parameters = EstimatorParameters()
         parameters.proxyRate = 4000
         let samples = (0..<16000).map { Float(0.5 + 0.1 * sin(2 * Double.pi * 300 * Double($0) / 8000)) }
-        let proxy = ProxySignal(buffer: try SampleBuffer(samples: samples, sampleRate: 8000), parameters: parameters)
+        let proxy = try ProxySignal(buffer: SampleBuffer(samples: samples, sampleRate: 8000), parameters: parameters)
         let interior = 1000..<7000
         #expect(abs(proxy.centeredRMS(interior) - 0.1 / 2.0.squareRoot()) < 0.002)
         // Constant input stays constant up to the buffer edges (edge extension, no invented step).
-        let flat = ProxySignal(buffer: try SampleBuffer(samples: [Float](repeating: 0.7, count: 16000), sampleRate: 8000), parameters: parameters)
+        let flat = try ProxySignal(buffer: SampleBuffer(samples: [Float](repeating: 0.7, count: 16000), sampleRate: 8000), parameters: parameters)
         #expect(flat.centeredRMS(interior) < 1e-6)
         #expect(flat.centeredRMS(0..<flat.samples.count) < 1e-6)
     }
@@ -210,7 +225,7 @@ struct EstimatorUnitTests {
     static func proxy(_ events: [SceneEvent], seed: UInt64, duration: Double = 20) throws -> ProxySignal {
         let recipe = TrackRecipe(sampleRate: 8000, duration: duration, groupClockStart: 0, truth: ClockTruth(ppm: 0, offset: 0),
                                  hearings: [Hearing(scene: Scene(events: events), gain: 1, delay: .none)], noiseRMS: 0.002, noiseSeed: seed)
-        return ProxySignal(buffer: try SampleBuffer(samples: recipe.render(), sampleRate: 8000), parameters: EstimatorParameters())
+        return try ProxySignal(buffer: SampleBuffer(samples: recipe.render(), sampleRate: 8000), parameters: EstimatorParameters())
     }
 
     static func observe(target: ProxySignal, reference: ProxySignal, at seconds: Double = 9) -> WindowObservation {

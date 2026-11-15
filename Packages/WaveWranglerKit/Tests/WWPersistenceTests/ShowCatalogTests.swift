@@ -7,6 +7,27 @@ import WWCore
 struct ShowCatalogTests {
     let coder = ShowCatalogCoder()
 
+    @Test(arguments: [
+        SourceObservations(durationSeconds: .known(-1)),
+        SourceObservations(channelCount: .known(0)),
+        SourceObservations(sampleRate: .known(0)),
+    ])
+    func invalidRecordingFactsRefuseEncodingAndHashValidEpisodeLoad(_ observations: SourceObservations) throws {
+        let source = SourceRecord(displayNameHint: "Generated", observations: observations)
+        let episode = Episode(title: "Generated", sources: [source])
+        let model = ShowDocumentModel(show: Show(title: "Generated"), episodes: [episode])
+        #expect(throws: PersistenceError.self) { try ShowPackageCoder().encode(model, revision: 1) }
+        let storage = try CatalogComponentStorage()
+        var files: [String: Data] = [:]
+        let component = try ShowPackage.component(JSONEncoder().encode(episode), files: &files)
+        let stored = try StoredCatalogEpisode(summary: CatalogEpisodeSummary(episode), content: component,
+            artwork: nil, files: files.mapValues { try storage.store($0) })
+        let catalog = ShowCatalog(header: ShowCatalogHeader(model), episodes: [stored], storage: storage)
+        let decoded = try coder.decode(coder.encode(catalog, revision: 2)).payload
+        let record = try #require(decoded.episode(episode.id))
+        #expect(throws: PersistenceError.self) { try record.load(in: decoded.header) }
+    }
+
     @Test func catalogRoundTripAndExplicitEpisodeLoadsPreserveTheCompleteModel() throws {
         let model = try ShowPackageTests.richShow()
         let catalog = try ShowCatalog(model)

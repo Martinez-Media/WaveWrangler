@@ -135,7 +135,7 @@ public struct DerivedAssetKey: Sendable, Hashable, Codable {
 
 /// SHA-256 over the canonical (sorted-key) JSON encoding. Used for keys and metadata tokens only; never for
 /// source content (see `DecodedContentDigest`).
-enum CanonicalDigest {
+package enum CanonicalDigest {
     static func hex<T: Encodable>(of value: T) -> String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
@@ -149,7 +149,7 @@ enum CanonicalDigest {
         digest.map { String(format: "%02x", $0) }.joined()
     }
 
-    static func hex(of data: Data) -> String {
+    package static func hex(of data: Data) -> String {
         hex(SHA256.hash(data: data))
     }
 

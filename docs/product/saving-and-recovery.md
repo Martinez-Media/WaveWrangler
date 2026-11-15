@@ -48,6 +48,14 @@ Do not treat **Duplicate** or **Save As** as a way to down-save a newer show.
 Cloud-provider conflict versions are reported, not automatically merged or
 removed.
 
+If macOS detects another application's edit, its native sheet may offer **Save**
+and **Don't Save**. **Don't Save** cancels that save attempt and keeps your open
+edits. Choosing **Save** still cannot bypass WaveWrangler's exact-version check.
+A refused native save can appear as **Not saved / Couldn't save**, rather than
+the separate **Conflict** status. Keep the edits open; **Save As** writes a new
+document without replacing the other writer's version. Closing after this failure
+offers **Save a Copy Elsewhere**, **Don't Save**, or **Cancel**.
+
 ## Recover unsaved work
 
 On opening a show, WaveWrangler may offer **Restore Unsaved Changes** from a
@@ -58,6 +66,9 @@ Changes based on an older revision, or a second set of recoverable edits, may
 only be opened with **Open as Separate Copy** so neither version is overwritten.
 Unreadable or newer-format checkpoints remain kept and are reported rather
 than applied. **Discard** is a separate confirmed decision.
+If deletion fails, the error is shown and the checkpoint remains available for
+review or retry. Discard applies only to the checkpoint you confirmed, not another
+offer that arrives while deletion is pending.
 
 If an incomplete save was recovered, read the persistent message and inspect
 the version that opened. Recovery is not a substitute for independent backups.

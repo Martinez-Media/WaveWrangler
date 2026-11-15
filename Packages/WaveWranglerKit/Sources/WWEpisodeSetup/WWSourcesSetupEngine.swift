@@ -223,7 +223,11 @@ public final class WWSourcesSetupEngine: SourceSetupEngine {
     private var pendingImports: [UUID: PendingImport] = [:]
     private var isShutDown = false
     private var proposals: [SourceID: (url: URL, proposal: RelinkProposal, previous: DeviceAccessRecord?)] = [:]
-    private var previousRecords: [UUID: DeviceAccessRecord?] = [:]
+    private struct RelinkRestoration {
+        var previous: DeviceAccessRecord?
+        var applied: DeviceAccessSnapshot
+    }
+    private var previousRecords: [UUID: RelinkRestoration] = [:]
     let captureRawIdentity: (@Sendable (URL, FileSystemFingerprint) async throws -> RawSourceIdentity)?
     private var defaultsObserver: NSObjectProtocol?
     /// Engine-owned work that touches the monitor; shutdown cancels and awaits it before stopping.
@@ -694,13 +698,19 @@ public final class WWSourcesSetupEngine: SourceSetupEngine {
 
     public func commitRelink(_ sourceID: SourceID, to url: URL, identity: IdentityStatus) async throws(SourceEngineError) -> RelinkReceipt {
         guard let stored = proposals[sourceID], stored.url == url else { throw .failed(reason: "choose the file again") }
+        guard let conditional = store as? any DeviceAccessConditionalStore,
+              let importing = store as? any DeviceAccessImportStore else {
+            throw .failed(reason: "this access store does not support conditional relinking")
+        }
         let key = key(sourceID)
         let previous: DeviceAccessRecord?
+        let previousSnapshot: DeviceAccessSnapshot?
         guard activeSourceIDs?()?.contains(sourceID) != false else {
             throw .failed(reason: "the source is no longer in this show")
         }
         do {
-            previous = try await store.record(for: key)
+            previousSnapshot = try await conditional.snapshot(for: key)
+            previous = previousSnapshot?.record
         } catch {
             throw .failed(reason: error.localizedDescription)
         }
@@ -763,13 +773,24 @@ public final class WWSourcesSetupEngine: SourceSetupEngine {
               final.candidateFingerprint == current.candidateFingerprint,
               final.comparison == current.comparison
         else { throw .failed(reason: "the chosen file changed; choose it again") }
+        let applied: DeviceAccessSnapshot
         do {
-            try await store.save(updated)
+            if let previousSnapshot {
+                guard let replaced = try await conditional.replace(updated, matching: previousSnapshot) else {
+                    throw DeviceAccessConditionalError.changed(key)
+                }
+                applied = replaced
+            } else {
+                guard let inserted = try await importing.insertNew([updated]).first else {
+                    throw DeviceAccessConditionalError.changed(key)
+                }
+                applied = inserted
+            }
         } catch {
             throw .failed(reason: error.localizedDescription)
         }
         let receipt = RelinkReceipt(sourceID: sourceID)
-        previousRecords[receipt.id] = previous
+        previousRecords[receipt.id] = RelinkRestoration(previous: previous, applied: applied)
         _ = await tracked { [monitor] in await monitor.refresh([sourceID]) }
         return receipt
     }
@@ -829,16 +850,19 @@ public final class WWSourcesSetupEngine: SourceSetupEngine {
     }
 
     public func revertRelink(_ receipt: RelinkReceipt) async throws(SourceEngineError) {
-        guard let previous = previousRecords.removeValue(forKey: receipt.id) else { return }
+        guard let restoration = previousRecords[receipt.id],
+              restoration.applied.record.sourceID == receipt.sourceID else {
+            throw .failed(reason: "the relink restoration receipt is unavailable")
+        }
+        guard let conditional = store as? any DeviceAccessConditionalStore else {
+            throw .failed(reason: "this access store does not support conditional relinking")
+        }
         do {
-            if let previous {
-                try await store.save(previous)
-            } else {
-                try await store.removeRecord(for: key(receipt.sourceID))
-            }
+            try await conditional.replace(restoration.previous, matching: restoration.applied)
         } catch {
             throw .failed(reason: error.localizedDescription)
         }
+        previousRecords[receipt.id] = nil
         let sourceID = receipt.sourceID
         _ = await tracked { [monitor] in await monitor.refresh([sourceID]) }
     }
@@ -881,6 +905,7 @@ public final class WWSourcesSetupEngine: SourceSetupEngine {
         let monitor = monitor
         withObservationTracking {
             _ = monitor.observations
+            _ = monitor.refreshFailures
             _ = monitor.setting
         } onChange: {
             signal.fire()
@@ -890,7 +915,13 @@ public final class WWSourcesSetupEngine: SourceSetupEngine {
     }
 
     private func snapshots(_ ids: Set<SourceID>) -> [SourceID: SourceStatusSnapshot] {
-        Dictionary(uniqueKeysWithValues: ids.map { ($0, WWSourcesStatusMapping.snapshot(monitor.observations[$0])) })
+        Dictionary(uniqueKeysWithValues: ids.map { id in
+            var snapshot = WWSourcesStatusMapping.snapshot(monitor.observations[id])
+            if let error = monitor.refreshFailures[id] {
+                snapshot.access = .unknown(reason: "Couldn't refresh source access (\(error.domain), \(error.code)). Refresh to try again.")
+            }
+            return (id, snapshot)
+        })
     }
 
     public func refresh(_ sourceIDs: [SourceID]) async {

@@ -110,10 +110,21 @@ echo "==> generated native Whisper timestamp bounds regression"
 bash "$ROOT/scripts/test-whisper-timestamps.sh"
 
 echo "==> swift test (Packages/WaveWranglerKit)"
+PACKAGE_LOG=""
+TIMING_LOG=""
+trap '[[ -z "$PACKAGE_LOG" ]] || rm -f "$PACKAGE_LOG"; [[ -z "$TIMING_LOG" ]] || rm -f "$TIMING_LOG"' EXIT
+PACKAGE_LOG="$(mktemp)"
 swift test \
   --package-path "$ROOT/Packages/WaveWranglerKit" \
   --scratch-path "$ROOT/.build/swiftpm" \
-  --jobs "$JOBS"
+  --jobs "$JOBS" 2>&1 | tee "$PACKAGE_LOG"
+# A green run summary also appears when no selected test actually passes.
+if ! grep -Eq 'Test (".+"|[^[:space:]]+\(.*\)) passed after' "$PACKAGE_LOG"; then
+  echo "package pass: no test executed and passed" >&2
+  rm -f "$PACKAGE_LOG"
+  exit 1
+fi
+rm -f "$PACKAGE_LOG"
 
 # The CPU-heavy WW-016 estimator suites run alone after the parallel suite. Calibration schedules at most
 # WW_ESTIMATOR_MAX_CONCURRENCY cases in flight (default 2, hard maximum 4); higher values require a matching
@@ -229,11 +240,18 @@ fi
 # the fault harness's own I/O does not distort the measurements.
 for timing_test in editToQuiescentCheckpointLatency publicationPipelineCost hundredShowsThousandSourceRefs estimatorThroughputBenchmark renderFamilyPeakAndThroughput; do
   echo "==> swift test timing pass: $timing_test"
+  TIMING_LOG="$(mktemp)"
   WW_TIMING_TESTS=1 swift test \
     --package-path "$ROOT/Packages/WaveWranglerKit" \
     --scratch-path "$ROOT/.build/swiftpm" \
     --jobs "$JOBS" \
-    --filter "$timing_test"
+    --filter "$timing_test" 2>&1 | tee "$TIMING_LOG"
+  if ! grep -Fq "Test $timing_test() passed" "$TIMING_LOG"; then
+    echo "timing pass: $timing_test did not run and pass" >&2
+    rm -f "$TIMING_LOG"
+    exit 1
+  fi
+  rm -f "$TIMING_LOG"
 done
 
 # WW-018 render calibration (M2-RENDER-001 calibration split) is CPU-bound for tens of seconds; it runs alone

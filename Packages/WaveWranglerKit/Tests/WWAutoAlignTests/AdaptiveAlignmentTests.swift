@@ -7,6 +7,28 @@ import WWTimeMap
 
 @Suite("File-local adaptive timing support")
 struct AdaptiveAlignmentTests {
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["WW_REVIEW_PREPARATION_MEASUREMENT"] == "1",
+                   "generated review preparation measurement"))
+    func generatedPreparationMeasurement() throws {
+        let reference = try SyntheticSpeech.track(start: 100, duration: 5, noiseLevel: 0)
+        for (label, target) in [
+            ("processed", try SyntheticSpeech.track(start: 100.5, duration: 4, offset: -0.17, processed: true)),
+            ("unrelated", try SyntheticSpeech.track(start: 100.5, duration: 4, seed: 711)),
+            ("step", try SyntheticSpeech.track(start: 100.5, duration: 4, offset: -0.17, stepAt: 102.5, step: 0.02)),
+        ] {
+            var durations: [Double] = []
+            var evidence: [DelayEvidence] = []
+            for _ in 0..<5 {
+                let start = ContinuousClock.now
+                evidence = try AdaptiveAlignment.measure(reference: reference, target: target, station: 0,
+                    predictedOffset: -0.17, deviation: 0.35)
+                let elapsed = start.duration(to: .now).components
+                durations.append(Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18)
+            }
+            print("R14-\(label)-evidence \(Data(String(reflecting: evidence).utf8).base64EncodedString())")
+            print("R14-\(label)-seconds \(durations)")
+        }
+    }
     static func points(_ range: Range<Int>, offset: Double = -9.53, ppm: Double = 0) -> [DelayEvidence] {
         range.map { index in
             let time = Double(index)

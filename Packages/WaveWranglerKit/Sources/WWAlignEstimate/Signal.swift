@@ -100,7 +100,8 @@ struct ProxySignal: Sendable {
     /// Prefix sums: sums[i] = sum of samples[0..<i].
     let sums: [Double]
 
-    init(buffer: SampleBuffer, parameters: EstimatorParameters) {
+    init(buffer: SampleBuffer, parameters: EstimatorParameters, isInterrupted: () -> Bool = { false }) throws(AlignEstimateError) {
+        if isInterrupted() { throw .interrupted }
         let inputRate = Double(buffer.sampleRate)
         let proxyRate = parameters.proxyRate
         // Integer decimation to an intermediate rate of at least 2x proxy, so the cubic step is accurate.
@@ -122,13 +123,14 @@ struct ProxySignal: Sendable {
         let input = buffer.samples
         let intermediateCount = (input.count + decimation - 1) / decimation
         var intermediate = [Double](repeating: 0, count: intermediateCount)
-        input.withUnsafeBufferPointer { x in
-            taps.withUnsafeBufferPointer { h in
-                intermediate.withUnsafeMutableBufferPointer { y in
+        try input.withUnsafeBufferPointer { x throws(AlignEstimateError) in
+            try taps.withUnsafeBufferPointer { h throws(AlignEstimateError) in
+                try intermediate.withUnsafeMutableBufferPointer { y throws(AlignEstimateError) in
                     // Edge samples are extended (clamped), not zero-padded: zero padding would invent a step at
                     // each buffer end, and two invented steps correlate with each other.
                     let last = x.count - 1
                     for k in 0..<intermediateCount {
+                        if k.isMultiple(of: 1024), isInterrupted() { throw .interrupted }
                         let center = k * decimation
                         var acc = 0.0
                         if center >= halfTaps && center + halfTaps <= last {
@@ -145,8 +147,9 @@ struct ProxySignal: Sendable {
         let ratio = intermediateRate / proxyRate // intermediate samples per proxy sample, >= 2
         let proxyCount = max(0, Int((Double(intermediateCount - 1) / ratio).rounded(.down)) + 1)
         var proxy = [Double](repeating: 0, count: proxyCount)
-        intermediate.withUnsafeBufferPointer { y in
+        try intermediate.withUnsafeBufferPointer { y throws(AlignEstimateError) in
             for k in 0..<proxyCount {
+                if k.isMultiple(of: 1024), isInterrupted() { throw .interrupted }
                 let position = Double(k) * ratio
                 let i = Int(position.rounded(.down))
                 let f = position - Double(i)
@@ -164,6 +167,7 @@ struct ProxySignal: Sendable {
         var energy = [Double](repeating: 0, count: proxy.count + 1)
         var sums = [Double](repeating: 0, count: proxy.count + 1)
         for k in proxy.indices {
+            if k.isMultiple(of: 1024), isInterrupted() { throw .interrupted }
             energy[k + 1] = energy[k] + proxy[k] * proxy[k]
             sums[k + 1] = sums[k] + proxy[k]
         }

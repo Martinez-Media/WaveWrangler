@@ -88,7 +88,7 @@ public actor AlignedAuditionPCMCache {
         }
         var contextKey: String?
         let tileLength: Int64 = 5 * Int64(AlignedAuditionWindowReader.outputRate)
-        let asset = AssetSpec(kind: "ww.aligned-listening-pcm", revision: 1)
+        let asset = AssetSpec(kind: "ww.aligned-listening-pcm", revision: 2)
         await coordinator.setAssetRevision(asset)
         var output: [Float] = []
         output.reserveCapacity(frames.count)
@@ -108,40 +108,41 @@ public actor AlignedAuditionPCMCache {
                         sourceFrames: interpretation.frames.validFrames, channelCount: interpretation.channelCount,
                         map: map, recipe: .m2Candidate)
                     // Persistent keys need canonical metadata; memory hits do not.
-                    contextKey = try encoder.encode(context).base64EncodedString()
+                    contextKey = CanonicalDigest.hex(of: try encoder.encode(context))
                     #if DEBUG
                     contextEncodingCount += 1
                     #endif
                 }
                 guard let contextKey else { throw ListeningPCM.Failure.invalidPayload }
-                let recipe = RecipeReference(name: "ww.aligned-listening-pcm;\(contextKey);tile=\(index)",
+                let recipe = RecipeReference(name: "ww.aligned-listening-pcm;context-v2=\(contextKey);tile=\(index)",
                     revision: RenderVersions.renderer)
                 let key = DerivedAssetKey(asset: asset, sources: [SourceRevision(source: source, token: token)],
                     format: .current, channel: channel, map: revision, recipe: recipe)
                 let slot = DerivedSlot("aligned-listening/\(source)/\(channel)/\(index)")
-                await coordinator.setRecipe(recipe)
                 samples = try await preparations.value(for: memoryKey) {
-                    let result = await coordinator.run(slot, key: key) { () throws(AlignmentWorkFailure) -> Data in
-                        do {
-                            let samples = try await AlignedAuditionWindowReader.readWindow(
-                                sourceURL: sourceURL, source: source, matching: witness, decoder: decoder,
-                                groupMap: map, decodedChannel: channel, outputFrames: tileFrames)
-                            return try ListeningPCM(firstFrame: tileFrames.lowerBound,
-                                sampleRate: AlignedAuditionWindowReader.outputRate, channels: [samples]).encode()
-                        } catch { throw workFailure(error) }
+                    try await coordinator.withDisposableSlot(slot, key: key) {
+                        let result = await coordinator.run(slot, key: key) { () throws(AlignmentWorkFailure) -> Data in
+                            do {
+                                let samples = try await AlignedAuditionWindowReader.readWindow(
+                                    sourceURL: sourceURL, source: source, matching: witness, decoder: decoder,
+                                    groupMap: map, decodedChannel: channel, outputFrames: tileFrames)
+                                return try ListeningPCM(firstFrame: tileFrames.lowerBound,
+                                    sampleRate: AlignedAuditionWindowReader.outputRate, channels: [samples]).encode()
+                            } catch { throw workFailure(error) }
+                        }
+                        try Task.checkCancellation()
+                        guard result.isAvailable, await coordinator.staleReasons(for: key).isEmpty,
+                              let bytes = await coordinator.readyPayload(for: slot, matching: key) else {
+                            throw result.typedFailure ?? AlignmentWorkFailure.encoding("Aligned listening PCM became stale or unavailable.")
+                        }
+                        let pcm = try ListeningPCM.decode(bytes)
+                        guard pcm.firstFrame == tileFrames.lowerBound,
+                              pcm.sampleRate == AlignedAuditionWindowReader.outputRate,
+                              pcm.channels.count == 1, pcm.channels[0].count == tileFrames.count else {
+                            throw ListeningPCM.Failure.invalidPayload
+                        }
+                        return pcm.channels[0]
                     }
-                    try Task.checkCancellation()
-                    guard result.isAvailable, await coordinator.staleReasons(for: key).isEmpty,
-                          let bytes = await coordinator.readyPayload(for: slot, matching: key) else {
-                        throw result.typedFailure ?? AlignmentWorkFailure.encoding("Aligned listening PCM became stale or unavailable.")
-                    }
-                    let pcm = try ListeningPCM.decode(bytes)
-                    guard pcm.firstFrame == tileFrames.lowerBound,
-                          pcm.sampleRate == AlignedAuditionWindowReader.outputRate,
-                          pcm.channels.count == 1, pcm.channels[0].count == tileFrames.count else {
-                        throw ListeningPCM.Failure.invalidPayload
-                    }
-                    return pcm.channels[0]
                 }
                 insert(samples, for: memoryKey)
             }

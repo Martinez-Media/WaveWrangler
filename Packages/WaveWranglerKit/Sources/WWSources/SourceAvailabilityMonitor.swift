@@ -17,12 +17,15 @@ public final class SourceAvailabilityMonitor {
     @ObservationIgnored public let transfers: SourceTransferController
     @ObservationIgnored private var tracked: [SourceID] = []
     @ObservationIgnored private var resolvedURLs: [SourceID: URL] = [:]
+    @ObservationIgnored private var refreshTokens: [SourceID: UUID] = [:]
     /// Sources whose transfer the user canceled; not automatically re-requested until Retry.
     @ObservationIgnored private var userCanceled: Set<SourceID> = []
     /// Bumped on every setting change; refreshes evaluated under an older setting are discarded (the
     /// change triggers its own refresh).
     @ObservationIgnored private var settingGeneration = 0
     @ObservationIgnored private var eventTask: Task<Void, Never>?
+    /// Persistence refusals are observable without turning a stale evaluation into a source grant.
+    public private(set) var refreshFailures: [SourceID: SourceErrorDescriptor] = [:]
     #if DEBUG
     /// Test only: suspends the detached evaluator task after launch, before synchronous source I/O.
     @ObservationIgnored package var evaluatorTaskDidStart: (@Sendable () async -> Void)?
@@ -163,10 +166,26 @@ public final class SourceAvailabilityMonitor {
     }
 
     private func refreshOne(_ sourceID: SourceID) async {
+        let token = UUID()
+        refreshTokens[sourceID] = token
         let generation = lifecycleGeneration
         let decided = transfers.shutdownTicket()
         let key = key(sourceID)
-        let record = try? await store.record(for: key)
+        let snapshot: DeviceAccessSnapshot?
+        let record: DeviceAccessRecord?
+        do {
+            if let conditional = store as? any DeviceAccessConditionalStore {
+                snapshot = try await conditional.snapshot(for: key)
+                record = snapshot?.record
+            } else {
+                snapshot = nil
+                record = try await store.record(for: key)
+            }
+        } catch {
+            guard refreshTokens[sourceID] == token, !isStopped, lifecycleGeneration == generation else { return }
+            refreshFailures[sourceID] = SourceErrorDescriptor(error)
+            return
+        }
         let transferState = await transfers.reportableState(of: key)
         let evaluator = SourceAvailabilityEvaluator(context: context)
         let evaluatedSetting = setting
@@ -180,11 +199,36 @@ public final class SourceAvailabilityMonitor {
             #endif
             return evaluator.evaluate(key: key, record: record, setting: evaluatedSetting, transfer: transferState)
         }.value
-        if let refreshed = evaluation.refreshedRecord {
-            try? await store.save(refreshed)
-        }
         // Re-read after every await: a setting change while this ran supersedes the result.
-        guard settingGeneration == evaluatedGeneration, !isStopped, lifecycleGeneration == generation else { return }
+        guard refreshTokens[sourceID] == token, settingGeneration == evaluatedGeneration,
+              !isStopped, lifecycleGeneration == generation else { return }
+        if let refreshed = evaluation.refreshedRecord {
+            do {
+                guard let conditional = store as? any DeviceAccessConditionalStore, let snapshot else {
+                    throw DeviceAccessConditionalError.unsupportedStore
+                }
+                try await conditional.replace(refreshed, matching: snapshot)
+            } catch {
+                guard refreshTokens[sourceID] == token, !isStopped, lifecycleGeneration == generation else { return }
+                refreshFailures[sourceID] = SourceErrorDescriptor(error)
+                return
+            }
+            guard refreshTokens[sourceID] == token, settingGeneration == evaluatedGeneration,
+                  !isStopped, lifecycleGeneration == generation else { return }
+        } else if let conditional = store as? any DeviceAccessConditionalStore {
+            do {
+                guard try await conditional.snapshot(for: key) == snapshot else {
+                    throw DeviceAccessConditionalError.changed(key)
+                }
+            } catch {
+                guard refreshTokens[sourceID] == token, !isStopped, lifecycleGeneration == generation else { return }
+                refreshFailures[sourceID] = SourceErrorDescriptor(error)
+                return
+            }
+            guard refreshTokens[sourceID] == token, settingGeneration == evaluatedGeneration,
+                  !isStopped, lifecycleGeneration == generation else { return }
+        }
+        refreshFailures[sourceID] = nil
         resolvedURLs[sourceID] = evaluation.resolvedURL
         observations[sourceID] = evaluation.observation
 

@@ -125,6 +125,28 @@ public protocol DeviceAccessSnapshotStore: DeviceAccessStore {
     func snapshot(for key: DeviceAccessKey) async throws -> DeviceAccessSnapshot?
 }
 
+/// Actor-atomic replacement of an existing grant, including removal. Legacy nil generations
+/// compare exact records; any write through these stores issues a generation, rejecting ABA.
+/// Store identity is required. This is not a cross-process compare-and-swap guarantee.
+public protocol DeviceAccessConditionalStore: DeviceAccessSnapshotStore {
+    @discardableResult
+    func replace(_ record: DeviceAccessRecord?, matching snapshot: DeviceAccessSnapshot) async throws -> DeviceAccessSnapshot?
+}
+
+public enum DeviceAccessConditionalError: Error, LocalizedError, Sendable, Equatable {
+    case changed(DeviceAccessKey)
+    case wrongKey(DeviceAccessKey)
+    case unsupportedStore
+
+    public var errorDescription: String? {
+        switch self {
+        case .changed: "The source access record changed. Refresh and review it before trying again."
+        case .wrongKey: "The replacement belongs to another source."
+        case .unsupportedStore: "This access store does not support conditional bookmark refresh."
+        }
+    }
+}
+
 /// A cheap mutation witness, never a source grant or a substitute for snapshot/admission checks.
 public struct DeviceAccessRevision: Sendable, Equatable {
     private enum Value: Sendable, Equatable {
@@ -173,7 +195,7 @@ public enum DeviceAccessStoreError: Error, Equatable, Sendable {
     case unreadable(SourceErrorDescriptor)
 }
 
-public actor InMemoryDeviceAccessStore: DeviceAccessImportStore, DeviceAccessRevisionStore {
+public actor InMemoryDeviceAccessStore: DeviceAccessImportStore, DeviceAccessRevisionStore, DeviceAccessConditionalStore {
     private var records: [DeviceAccessKey: DeviceAccessSnapshot] = [:]
     private let identity = UUID()
     private var mutation = UUID()
@@ -197,6 +219,15 @@ public actor InMemoryDeviceAccessStore: DeviceAccessImportStore, DeviceAccessRev
                                                   storeIdentity: identity)
     }
     public func save(_ records: [DeviceAccessRecord]) { for record in records { save(record) } }
+    public func replace(_ record: DeviceAccessRecord?, matching snapshot: DeviceAccessSnapshot) throws -> DeviceAccessSnapshot? {
+        let key = snapshot.record.key
+        guard record == nil || record?.key == key else { throw DeviceAccessConditionalError.wrongKey(key) }
+        guard snapshot.storeIdentity == identity, records[key] == snapshot else {
+            throw DeviceAccessConditionalError.changed(key)
+        }
+        if let record { save(record) } else { removeRecord(for: key) }
+        return records[key]
+    }
     public func removeRecord(for key: DeviceAccessKey) {
         if records.removeValue(forKey: key) != nil { mutation = UUID() }
     }
@@ -235,7 +266,7 @@ public actor InMemoryDeviceAccessStore: DeviceAccessImportStore, DeviceAccessRev
 
 /// JSON-file store in the app container (Application Support). The store file is the only thing it
 /// ever writes; it never touches sources.
-public actor FileDeviceAccessStore: DeviceAccessImportStore, DeviceAccessRevisionStore {
+public actor FileDeviceAccessStore: DeviceAccessImportStore, DeviceAccessRevisionStore, DeviceAccessConditionalStore {
     private static let storeSchemaVersion = 2
     private let identity = UUID()
 
@@ -334,6 +365,21 @@ public actor FileDeviceAccessStore: DeviceAccessImportStore, DeviceAccessRevisio
                                                   storeIdentity: identity)
         }
         try persist(all)
+    }
+
+    public func replace(_ record: DeviceAccessRecord?, matching snapshot: DeviceAccessSnapshot) throws -> DeviceAccessSnapshot? {
+        let key = snapshot.record.key
+        guard record == nil || record?.key == key else { throw DeviceAccessConditionalError.wrongKey(key) }
+        var all = try load()
+        guard snapshot.storeIdentity == identity, all[key] == snapshot else {
+            throw DeviceAccessConditionalError.changed(key)
+        }
+        let updated = record.map {
+            DeviceAccessSnapshot(record: $0, mutationGeneration: DeviceAccessGeneration(UUID()), storeIdentity: identity)
+        }
+        all[key] = updated
+        try persist(all)
+        return updated
     }
 
     public func insertNew(_ proposed: [DeviceAccessRecord]) throws -> [DeviceAccessSnapshot] {

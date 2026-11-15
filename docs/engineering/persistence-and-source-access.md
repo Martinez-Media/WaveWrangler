@@ -17,6 +17,9 @@ Library envelopes contain `checksum`, `format`, `payload`, `publicationID`,
 it detects integrity failure, not authenticity. A revision orders publications
 but does not prove identity: conflict detection compares the exact opened base,
 publication ID and checksum.
+Supported library envelopes refuse unrecognized root fields instead of silently
+dropping them on publication; this includes the supported schema-1 migration.
+Unknown-newer admission still precedes this shape check.
 
 Unknown-newer envelope and embedded schemas are refused before version-specific
 payload/checksum interpretation. Do not treat them as damaged files, downsave
@@ -55,6 +58,10 @@ verify all stored component digests/bounds and the complete index, then validate
 episode semantics on demand. Untouched components are preserved exactly, not
 replaced with empty values; an opaque, hash-valid but semantically invalid episode
 fails visibly when opened. Catalog-only save does not certify its deferred semantics.
+Known recording media observations must have valid duration, channel count and
+sample rate, just like supplemental media. Unknown facts remain valid. Invalid
+previously accepted facts now refuse canonical encoding or explicit episode load;
+the reader does not repair measurements or open audio to invent replacements.
 Version-1 compatibility readers validate the complete reconstructed model/checksum.
 Reads reject links and nonregular children through read-only,
 directory-relative descriptors. Limits are 64 MiB per component, 10,000 episodes
@@ -196,6 +203,11 @@ wrapper cache there; without a snapshot, background calls throw
 instead of reading the live model. Direct main-actor serialization remains
 available outside a save. Keep stock `super.writeSafely`,
 `AlreadyCoordinated`, exact-base conflict checks and independent read-back.
+AppKit's external-change sheet keeps its native Save/Don't Save choices; Save
+does not bypass the exact-base refusal. A wrapped native error can take the
+explicit Not saved/Couldn't save presentation rather than the typed Conflict
+state. Failed-save close retains the copy/Don't Save/Cancel policy; Cancel
+publishes nothing and Save As must leave the other writer's bytes/model intact.
 Capture AppKit's change-count token with the model snapshot. With autosave off,
 AppKit may clear all changes at completion rather than apply its asynchronous
 token; apply the captured token instead when later edits remain. Preserve the
@@ -219,6 +231,9 @@ discarding checkpoints, preventing a late write or immediate termination from
 resurrecting discarded recovery; a cleanup failure visibly refuses close.
 Explicit recovery review and uncertain-save reconciliation retain their safety
 checks.
+Confirmed checkpoint Discard captures only the offered record and runs on that
+lane. Deletion failure is presented before reassessing the current offer; a later
+offer is not included in the original deletion.
 
 Do not open an Undo group across an await. Async work needs exact generations
 and identity/slot currency, including equal-byte Undo/restore ABA. Auxiliary
@@ -260,6 +275,21 @@ admission cache. Export compares frozen relevant `DeviceAccessSnapshot` values
 when the shared revision changes, preserving unrelated-show edits while refusing
 revoke/restore ABA. Actual source reads and export publication still require
 full current admission checks; see [export](export-codecs.md#frozen-production-jobs).
+
+Bookmark refresh and relink inverse use `DeviceAccessConditionalStore` snapshots.
+Both built-in stores compare exact record/generation and store identity atomically
+within their actor; this is not cross-process compare-and-swap. Legacy nil
+generations compare exact records, and every new write issues a generation to
+reject write/remove/restore ABA. Unsupported stores refuse these writes.
+Per-source refresh tokens prevent superseded evaluations from publishing either
+observations or failures. None of this authorizes source-content reads.
+
+A failed relink inverse retains its receipt, reports that the relink remains
+applied, removes invalid Redo and reoffers named Undo. Registering that retry can
+clear existing Redo history. An intervening grant mutation refuses rather than
+overwriting it; retry is useful for a cleared store fault, not authority to restore
+over a newer relink. Missing-key insertion guarantees current absence, not
+absence-key ABA protection.
 
 `ForbiddenAPITests` recursively scans package modules and app code for alternate
 content readers. Memory-only PCM conversion in `WWDecode/PCMResampling.swift`

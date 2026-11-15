@@ -12,6 +12,7 @@ public final class RelinkUndoRegistrar {
     /// One relink commit; undo waits for its receipt before reverting.
     private final class Operation {
         var receipt: Task<RelinkReceipt?, Never>?
+        var invalidated = false
     }
 
     private struct Request {
@@ -25,6 +26,7 @@ public final class RelinkUndoRegistrar {
     public let engine: any SourceSetupEngine
     /// Called on the main actor when a commit fails; the failed action is removed from undo.
     public var onFailure: (String) -> Void = { _ in }
+    public var onUndoFailure: (String) -> Void = { _ in }
     private var tail: Task<Void, Never>?
     /// `UndoManager` doesn't retain targets; registered operations are kept alive here.
     private var targets: [ObjectIdentifier: Operation] = [:]
@@ -56,34 +58,49 @@ public final class RelinkUndoRegistrar {
             MainActor.assumeIsolated {
                 guard let self else { return }
                 // Inverse first, synchronously, so it is recorded as the redo of this undo.
-                self.registerRedo(request)
-                self.enqueue { [engine = self.engine] in
+                let redo = self.registerRedo(request)
+                self.enqueue { [weak self, engine = self.engine] in
                     guard let receipt = await operation.receipt?.value else { return }
-                    try? await engine.revertRelink(receipt)
+                    do {
+                        try await engine.revertRelink(receipt)
+                    } catch {
+                        guard let self else { return }
+                        redo.invalidated = true
+                        self.undoManager.removeAllActions(withTarget: redo)
+                        self.targets[ObjectIdentifier(redo)] = nil
+                        self.grouped { self.registerUndo(of: operation, request) }
+                        self.onUndoFailure((error as? SourceEngineError)?.reason ?? error.localizedDescription)
+                    }
                 }
             }
         }
         undoManager.setActionName(request.actionName)
     }
 
-    private func registerRedo(_ request: Request) {
+    private func registerRedo(_ request: Request) -> Operation {
         let marker = Operation()
         targets[ObjectIdentifier(marker)] = marker
-        undoManager.registerUndo(withTarget: marker) { [weak self] _ in
+        undoManager.registerUndo(withTarget: marker) { [weak self] marker in
             MainActor.assumeIsolated {
                 guard let self else { return }
                 let operation = Operation()
                 self.registerUndo(of: operation, request)
-                self.enqueueCommit(operation, request)
+                self.enqueueCommit(operation, request, redo: marker)
             }
         }
         undoManager.setActionName(request.actionName)
+        return marker
     }
 
-    private func enqueueCommit(_ operation: Operation, _ request: Request) {
+    private func enqueueCommit(_ operation: Operation, _ request: Request, redo: Operation? = nil) {
         let previous = tail
         let commit = Task { [engine, weak self] () -> RelinkReceipt? in
             await previous?.value
+            guard redo?.invalidated != true else {
+                self?.undoManager.removeAllActions(withTarget: operation)
+                self?.targets[ObjectIdentifier(operation)] = nil
+                return nil
+            }
             do {
                 return try await engine.commitRelink(request.sourceID, to: request.url, identity: request.identity)
             } catch {

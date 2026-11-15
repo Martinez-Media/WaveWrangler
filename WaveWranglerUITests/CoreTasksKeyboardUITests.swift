@@ -1,4 +1,5 @@
 import AppKit
+import WWPersistence
 import XCTest
 
 /// Integrated M1 keyboard tasks not covered by the lane suites (accessibility-acceptance T01, T02 undo,
@@ -42,10 +43,7 @@ final class CoreTasksKeyboardUITests: XCTestCase {
             check(app.buttons["Create"].waitForExistence(timeout: 5), "save panel shown (Create button)")
             app.typeKey("a", modifierFlags: .command)
             app.typeText("Keyboard Show")
-            app.typeKey("g", modifierFlags: [.command, .shift])
-            Thread.sleep(forTimeInterval: 0.5)
-            app.typeText(workDirectory.path + "\r")
-            Thread.sleep(forTimeInterval: 0.5)
+            try chooseSaveFolder(confirmButton: "Create")
             app.typeKey(.return, modifierFlags: [])
             let file = workDirectory.appending(path: "Keyboard Show.wwshow")
             check(Acceptance.waitFor(timeout: 10) { FileManager.default.fileExists(atPath: file.path) }, "show file created at the chosen location")
@@ -110,26 +108,42 @@ final class CoreTasksKeyboardUITests: XCTestCase {
         }
     }
 
-    /// T16 (K16): another writer changes the file; ⌘S never overwrites it; the status reads Conflict; Close
-    /// while conflicted has no plain Save.
+    /// T16 (K16): another writer changes the file; native Save anyway still refuses the exact-base
+    /// conflict, reports Not saved, and Close offers a copy rather than a plain Save.
     func testT16ConflictNeverOverwrites() throws {
         let document = try makeDocument("Conflict")
         try task("T16") {
             let window = try launchAndOpen(document, autosave: false)
             try probe(["save", "--file", document.path, "--title", "Other Writer"])
             check(diskTitle(document) == "Other Writer", "second writer published")
+            let otherVersion = try ShowStorage.read(document)
+            let otherModel = try ShowPackageCoder().decode(otherVersion).payload
             try editShowTitle(window, "Mine")
+            let status = element("ww.show.saveStatus")
             app.typeKey("s", modifierFlags: .command)
-            Thread.sleep(forTimeInterval: 1)
+            check(Acceptance.waitFor(timeout: 5) {
+                self.app.sheets.firstMatch.exists
+            }, "Save presents its conflict response: \(nativeSheetDescription()), status \(value(status))")
             // AppKit asks about the external change ("Save anyway?"). Choose its Save: the base check must
             // still refuse to overwrite the other writer's version (WW-009 C3/C4).
             if app.sheets.firstMatch.waitForExistence(timeout: 3) {
                 let sheet = app.sheets.firstMatch
                 Acceptance.record(self, "T16 sheet: \(sheet.staticTexts.allElementsBoundByIndex.map(\.value)) buttons \(sheet.buttons.allElementsBoundByIndex.map(\.title))")
                 try audit("T16 external-change sheet")
-                check(sheet.buttons["Save Mine as a Copy…"].exists, "conflict sheet offers Save Mine as a Copy… (Design D6; deferred in #66)")
-                if sheet.buttons["Save"].exists { sheet.buttons["Save"].click() } else { app.typeKey(.escape, modifierFlags: []) }
-                Thread.sleep(forTimeInterval: 2)
+                check(sheet.buttons["Save"].exists && sheet.buttons["Don’t Save"].exists,
+                      "native external-change sheet offers Save and Don’t Save")
+                sheet.buttons["Don’t Save"].click()
+                check(Acceptance.waitFor(timeout: 5) { !self.app.sheets.firstMatch.exists },
+                      "Don’t Save cancels this save attempt")
+                check(window.exists && window.title.contains("Mine"), "cancel keeps the user's open edits")
+                check(try ShowStorage.read(document) == otherVersion, "cancel does not publish over the other writer")
+                app.typeKey("s", modifierFlags: .command)
+                check(sheet.waitForExistence(timeout: 5), "explicit retry presents the external-change sheet again")
+                let before = nativeSheetDescription()
+                if sheet.buttons["Save"].exists { sheet.buttons["Save"].click() }
+                else if sheet.buttons["OK"].exists { app.typeKey(.return, modifierFlags: []) }
+                else { app.typeKey(.escape, modifierFlags: []) }
+                waitForSheetTransition(from: before, window: window)
                 if app.sheets.firstMatch.exists {
                     let refusal = app.sheets.firstMatch
                     Acceptance.record(self, "T16 after Save anyway: \(refusal.staticTexts.allElementsBoundByIndex.map { $0.value ?? $0.label }) buttons \(refusal.buttons.allElementsBoundByIndex.map(\.title))")
@@ -139,29 +153,33 @@ final class CoreTasksKeyboardUITests: XCTestCase {
                 }
             }
             check(diskTitle(document) == "Other Writer", "the other version is not overwritten (even after Save anyway)")
-            let status = element("ww.show.saveStatus")
             Acceptance.record(self, "T16 save status after Save anyway: label \(status.label) value \(value(status)) window title \(window.title)")
-            check(Acceptance.waitFor(timeout: 5) { self.value(status).hasPrefix("Conflict") }, "status Conflict: \(value(status))")
-            app.typeKey("w", modifierFlags: .command)
+            check(Acceptance.waitFor(timeout: 5) {
+                self.value(status).hasPrefix("Not saved") && self.value(status).contains("Couldn't save:")
+            }, "native refused save is explicitly Not saved/Couldn't save: \(value(status))")
+            app.typeKey("w", modifierFlags: [.command, .shift])
             if app.sheets.firstMatch.waitForExistence(timeout: 5) {
                 let sheet = app.sheets.firstMatch
                 Acceptance.record(self, "T16 close sheet: \(sheet.staticTexts.allElementsBoundByIndex.map { $0.value ?? $0.label }) buttons \(sheet.buttons.allElementsBoundByIndex.map(\.title))")
                 check(!sheet.buttons["Save"].exists, "no plain Save while conflicted (Design D6)")
                 if sheet.buttons["Save"].exists {
                     // Exercise it: a plain Save from the close sheet must still never overwrite the other version.
+                    let before = nativeSheetDescription()
                     sheet.buttons["Save"].click()
-                    Thread.sleep(forTimeInterval: 2)
+                    waitForSheetTransition(from: before, window: window)
                     for _ in 0..<3 where app.sheets.firstMatch.exists {
                         let next = app.sheets.firstMatch
                         Acceptance.record(self, "T16 after close-sheet Save: \(next.staticTexts.allElementsBoundByIndex.map { $0.value ?? $0.label }) buttons \(next.buttons.allElementsBoundByIndex.map(\.title))")
+                        let before = nativeSheetDescription()
                         if next.buttons["Save"].exists { next.buttons["Save"].click() } else if next.buttons["OK"].exists { app.typeKey(.return, modifierFlags: []) } else { app.typeKey(.escape, modifierFlags: []) }
-                        Thread.sleep(forTimeInterval: 2)
+                        waitForSheetTransition(from: before, window: window)
                     }
                     Acceptance.record(self, "T16 after close-sheet Save: window exists \(window.exists), status \(window.exists ? value(status) : "closed"), disk \(diskTitle(document) ?? "nil")")
                     check(window.exists, "the conflicted window isn't closed by a refused save (work kept)")
                 } else {
                     app.typeKey(.escape, modifierFlags: [])
                     check(Acceptance.waitFor(timeout: 5) { !self.app.sheets.firstMatch.exists } && window.exists, "Esc (Cancel) dismisses the close sheet and keeps the window open")
+                    check(try ShowStorage.read(document) == otherVersion, "close Cancel does not publish")
                 }
             } else {
                 check(false, "Close while conflicted asks how to keep the changes")
@@ -175,17 +193,17 @@ final class CoreTasksKeyboardUITests: XCTestCase {
                 if panelShown {
                     app.typeKey("a", modifierFlags: .command)
                     app.typeText("Conflict Mine")
-                    app.typeKey("g", modifierFlags: [.command, .shift])
-                    Thread.sleep(forTimeInterval: 0.5)
-                    app.typeText(workDirectory.path + "\r")
-                    Thread.sleep(forTimeInterval: 0.5)
+                    try chooseSaveFolder(confirmButton: "Save")
                     app.typeKey(.return, modifierFlags: [])
                     check(Acceptance.waitFor(timeout: 10) { self.diskTitle(copy) == "Mine" }, "Save As from conflict wrote the user's edits to a new document: \(diskTitle(copy) ?? "nil")")
                     let status = element("ww.show.saveStatus")
                     Acceptance.record(self, "T16 after Save As: window title \(window.title), status \(value(status)), copy \(diskTitle(copy) ?? "nil"), other \(diskTitle(document) ?? "nil")")
                 }
             }
-            check(diskTitle(document) == "Other Writer", "other version byte-unchanged at the end")
+            let retained = try ShowStorage.read(document)
+            check(retained == otherVersion, "other writer's complete stored bytes remain unchanged")
+            check(try ShowPackageCoder().decode(retained).payload == otherModel,
+                  "other writer's complete model remains unchanged after refusal, Cancel and Save As")
         }
     }
 
@@ -321,6 +339,40 @@ final class CoreTasksKeyboardUITests: XCTestCase {
 
     // MARK: - Helpers
 
+    private func chooseSaveFolder(confirmButton: String) throws {
+        app.typeKey("g", modifierFlags: [.command, .shift])
+        var pathField: XCUIElement?
+        let focused = Acceptance.waitFor(timeout: 5) {
+            pathField = self.app.textFields.allElementsBoundByIndex.first {
+                ($0.value(forKey: "hasKeyboardFocus") as? Bool) == true
+                    && self.value($0).hasPrefix("/")
+            }
+            return pathField != nil
+        }
+        check(focused, "Go to Folder has a focused path field")
+        guard let pathField else { throw NSError(domain: "CoreTasks", code: 3) }
+        pathField.typeKey("a", modifierFlags: .command)
+        pathField.typeText(workDirectory.path)
+        check(Acceptance.waitFor(timeout: 5) { self.value(pathField) == self.workDirectory.path },
+              "Go to Folder contains the requested path: \(value(pathField))")
+        app.typeKey(.return, modifierFlags: [])
+        check(Acceptance.waitFor(timeout: 5) {
+            self.app.buttons[confirmButton].isHittable
+        }, "\(confirmButton) is ready after Go to Folder closes: \(nativeSheetDescription())")
+    }
+
+    private func nativeSheetDescription() -> String {
+        let sheet = app.sheets.firstMatch
+        guard sheet.exists else { return "no sheet" }
+        return "\(sheet.staticTexts.allElementsBoundByIndex.map { $0.value ?? $0.label }) \(sheet.buttons.allElementsBoundByIndex.map(\.title))"
+    }
+
+    private func waitForSheetTransition(from previous: String, window: XCUIElement) {
+        check(Acceptance.waitFor(timeout: 5) {
+            !window.exists || self.nativeSheetDescription() != previous
+        }, "native response changed after the action: \(nativeSheetDescription())")
+    }
+
     private func launch(_ arguments: [String], opening document: URL? = nil) {
         app = XCUIApplication()
         app.launchArguments = ["-ApplePersistenceIgnoreState", "YES", "-WWUITestHooks", "YES", "-WWUITestResetPreferences", "YES",
@@ -335,8 +387,7 @@ final class CoreTasksKeyboardUITests: XCTestCase {
     private func openOptionally(_ document: URL, autosave: Bool, expectWindow: Bool = false, freshStorage: Bool = false,
                                 extraArguments: [String] = []) throws -> XCUIElement? {
         launch(["-WWUITestAutosave", autosave ? "ON" : "OFF"] + (freshStorage ? ["-WWUITestResetStorage", "YES"] : []) + extraArguments, opening: document)
-        let name = document.deletingPathExtension().lastPathComponent
-        let window = app.windows.matching(NSPredicate(format: "title BEGINSWITH %@", name)).firstMatch
+        let window = app.windows.matching(identifier: "ww.show.window").firstMatch
         guard window.waitForExistence(timeout: 10) else {
             if expectWindow { throw NSError(domain: "CoreTasks", code: 1, userInfo: [NSLocalizedDescriptionKey: "window did not open"]) }
             return nil
@@ -345,7 +396,7 @@ final class CoreTasksKeyboardUITests: XCTestCase {
             DistributedNotificationCenter.default().postNotificationName(Self.autosaveOff, object: nil, userInfo: nil, deliverImmediately: true)
             Thread.sleep(forTimeInterval: 0.3)
         }
-        return app.windows.matching(identifier: "ww.show.window").firstMatch
+        return window
     }
 
     private func launchAndOpen(_ document: URL, autosave: Bool, freshStorage: Bool = true,
@@ -353,6 +404,25 @@ final class CoreTasksKeyboardUITests: XCTestCase {
         guard let window = try openOptionally(document, autosave: autosave, expectWindow: true, freshStorage: freshStorage,
                                               extraArguments: extraArguments) else {
             throw NSError(domain: "CoreTasks", code: 1)
+        }
+        let update = window.buttons["ww.formatUpdate.update"]
+        let status = window.buttons["ww.show.saveStatus"]
+        guard Acceptance.waitFor(timeout: 5, {
+            status.exists && (update.exists || !self.value(status).hasPrefix("Read-only"))
+        }) else {
+            throw NSError(domain: "CoreTasks", code: 4, userInfo: [
+                NSLocalizedDescriptionKey: "Generated fixture is not editable: \(nativeSheetDescription())"
+            ])
+        }
+        if update.exists {
+            update.click()
+            guard Acceptance.waitFor(timeout: 10, {
+                !update.exists && !self.value(status).hasPrefix("Read-only")
+            }) else {
+                throw NSError(domain: "CoreTasks", code: 4, userInfo: [
+                    NSLocalizedDescriptionKey: "Generated fixture update did not finish: \(nativeSheetDescription())"
+                ])
+            }
         }
         return window
     }
@@ -369,14 +439,28 @@ final class CoreTasksKeyboardUITests: XCTestCase {
     }
 
     private func editShowTitle(_ window: XCUIElement, _ title: String) throws {
-        let showInfo = window.descendants(matching: .any).matching(identifier: "ww.show.sidebar.showInfo").firstMatch
-        if showInfo.waitForExistence(timeout: 5) { showInfo.click() }
-        let field = window.textFields["Show title"]
+        EpisodeLibraryNavigation.browseCurrentShow(in: app)
+        let library = app.windows["ww.library.window"]
+        let showInfo = library.descendants(matching: .any).matching(identifier: "ww.show.sidebar.showInfo").firstMatch
+        guard showInfo.waitForExistence(timeout: 5) else { throw NSError(domain: "CoreTasks", code: 2) }
+        showInfo.click()
+        let field = library.textFields["Show title"]
         guard field.waitForExistence(timeout: 5) else { throw NSError(domain: "CoreTasks", code: 2) }
         field.click()
         field.typeKey("a", modifierFlags: .command)
         field.typeText(title)
         field.typeKey(.return, modifierFlags: [])
+        let episodeTitle = window.title.components(separatedBy: " \u{2013} ").first ?? window.title
+        app.menuBars.menuBarItems["Window"].click()
+        let editor = app.menuBars.menuItems.matching(NSPredicate(
+            format: "title BEGINSWITH %@ OR label BEGINSWITH %@", episodeTitle, episodeTitle
+        )).firstMatch
+        guard editor.exists else {
+            throw NSError(domain: "CoreTasks", code: 5, userInfo: [
+                NSLocalizedDescriptionKey: "Window menu is missing \(episodeTitle)"
+            ])
+        }
+        editor.click()
     }
 
     private func audit(_ surface: String) throws {

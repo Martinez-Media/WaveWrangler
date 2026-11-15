@@ -91,6 +91,10 @@ public struct JSONEnvelopeCoder<Payload: Codable & Sendable>: CanonicalDocumentC
         guard (try? decoder.decode(JSONValue.self, from: canonicalBytes)) == rawPayload else {
             throw .unrecognizedContent
         }
+        guard case let .object(root)? = try? decoder.decode(JSONValue.self, from: data),
+              Set(root.keys) == ["format", "schemaVersion", "revision", "publicationID", "checksum", "payload"] else {
+            throw .unrecognizedContent
+        }
 
         let issues = validate(payload, version.schemaVersion)
         guard issues.isEmpty else { throw .invalidPayload(issues) }

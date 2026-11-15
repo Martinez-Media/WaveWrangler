@@ -203,6 +203,7 @@ func workFailure(_ error: any Error) -> AlignmentWorkFailure {
     case let failure as AdaptiveAudioRenderFailure: .adaptiveAudio(failure)
     case let failure as PitchPreservingAudio.Failure: .adaptiveAudio(.processing(failure))
     case is CancellationError: .canceled
+    case let failure as DisposableDerivedFailure: .encoding(failure.localizedDescription)
     case let failure as ResourceGate.Refusal:
         switch failure {
         case let .exceedsBudget(requested, budget): .memoryBudget(requested: requested, budget: budget)

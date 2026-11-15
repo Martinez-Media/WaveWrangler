@@ -89,6 +89,9 @@ windowless but retained in AppKit's save/quit lifecycle.
 `EpisodeAlignmentModel` owns document-facing presentation and job admission.
 `AlignmentRuntime` owns source/map admission and processing adapters.
 `AlignmentWaveformCache` owns bounded measured tiles and atomic reprojection.
+Affine listening tiles use `DerivedJobCoordinator`'s bounded disposable ownership
+through payload consumption; live dependencies and unfinished jobs pin metadata.
+Retirement drops disposable registrations, not canonical history or verified files.
 `AlignmentAudioPlayback` owns the shared engine, serial output queue, scheduled
 buffers and native playback clock. `EpisodeMixerController` owns the episode's
 production processor and native-state integration.

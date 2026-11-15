@@ -19,6 +19,7 @@ public struct ValidationIssue: Sendable, Equatable, CustomStringConvertible {
         case invalidMix
         case invalidAudio
         case invalidSourcePurpose
+        case invalidSourceMediaFacts
         case invalidPublication
     }
 
@@ -77,8 +78,8 @@ extension ShowDocumentModel {
     private static func issues(in episode: Episode, speakerIDs: Set<SpeakerID>) -> [ValidationIssue] {
         var issues: [ValidationIssue] = []
         for source in episode.sources {
-            if !source.isRecording, !source.observations.isValid {
-                issues.append(.init(.invalidSourcePurpose, "asset \(source.id) has invalid observed media facts"))
+            if !source.observations.isValid {
+                issues.append(.init(.invalidSourceMediaFacts, "source \(source.id) has invalid observed media facts"))
             }
             if !source.isRecording,
                source.placement.recorderGroupID != nil || source.placement.epochID != nil

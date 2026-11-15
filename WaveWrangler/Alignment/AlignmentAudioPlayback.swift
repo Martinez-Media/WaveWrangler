@@ -31,6 +31,7 @@ struct AlignmentPlaybackSnapshot: Sendable {
     var linearClock: AlignmentPlaybackClock?
     var programTimeline = PlaybackProgramTimeline()
     var failure: AlignmentTransportFailure?
+    var sourceMeters = MixerConsoleSnapshot()
 
     var clock: AlignmentPlaybackClock? {
         guard var result = linearClock else { return nil }
@@ -182,10 +183,10 @@ final class AlignmentAudioPlayback: @unchecked Sendable {
     var generation: UInt64 { queue.sync { sessionGeneration } }
     var preparedSources: Set<SourceID> { queue.sync { graph.preparedSources } }
     var pendingSources: Set<SourceID> { queue.sync { graph.pendingSources } }
-    var sourceMeters: MixerConsoleSnapshot { queue.sync { graph.readSourceMeters() } }
+    var sourceMeters: MixerConsoleSnapshot { snapshot.sourceMeters }
 
     func resetSourceMeterPeaks(for bus: MixerBusAddress) {
-        queue.sync { graph.sourceMetering.resetPeaks(for: bus) }
+        queue.sync { graph.resetSourceMeterPeaks(for: bus) }
     }
 
     func stop() { queue.sync { sessionGeneration &+= 1; graph.stop() } }
@@ -396,7 +397,8 @@ private final class AlignmentAudioPlaybackGraph: @unchecked Sendable {
     }
 
     private func publishSnapshot() {
-        snapshots.publish(.init(linearClock: clock, programTimeline: programTimeline, failure: failure))
+        snapshots.publish(.init(linearClock: clock, programTimeline: programTimeline, failure: failure,
+            sourceMeters: readSourceMeters()))
     }
 
     private var elapsedAudioSeconds: Double? {
@@ -629,6 +631,7 @@ private final class AlignmentAudioPlaybackGraph: @unchecked Sendable {
 
     func setGains(_ gains: [SourceID: Float]) {
         guard gains != listeningGains else { return }
+        defer { publishSnapshot() }
         _ = readSourceMeters()
         listeningGains = gains
         updateSourceGains()
@@ -637,6 +640,7 @@ private final class AlignmentAudioPlaybackGraph: @unchecked Sendable {
 
     func setRecordingInputGains(_ gains: [RecordingInputGain]) {
         guard gains != recordingInputGains else { return }
+        defer { publishSnapshot() }
         _ = readSourceMeters()
         recordingInputGains = gains
         updateSourceGains()
@@ -656,6 +660,12 @@ private final class AlignmentAudioPlaybackGraph: @unchecked Sendable {
             return MixerConsoleSnapshot()
         }
         return sourceMetering.read(through: Int64((clock.playhead() * Double(MixerRecipe.sampleRate)).rounded(.down)))
+    }
+
+    func resetSourceMeterPeaks(for bus: MixerBusAddress) {
+        _ = readSourceMeters()
+        sourceMetering.resetPeaks(for: bus)
+        publishSnapshot()
     }
 
     static func validateProduction(_ output: MixerPCMOutput) throws -> AlignmentAudioClip {
@@ -730,6 +740,7 @@ private final class AlignmentAudioPlaybackGraph: @unchecked Sendable {
     }
 
     func excludeSource(_ source: SourceID) {
+        defer { publishSnapshot() }
         _ = readSourceMeters()
         sourceMetering.gains[source] = nil
         sourceJoinTasks.removeValue(forKey: source)?.cancel()

@@ -72,9 +72,9 @@ struct AlignmentWaveformView: View {
     }
 
     private var visibleTracks: [AlignmentWaveformTrack] {
-        layout == .speakersOnly
-            ? model.waveformTracks.filter { model.primaryWaveformSources.contains($0.id) }
-            : model.waveformTracks
+        guard layout == .speakersOnly else { return model.waveformTracks }
+        let eligible = model.primaryWaveformSources
+        return model.waveformTracks.filter { eligible.contains($0.id) }
     }
     private var activeSourceID: SourceID? {
         if let selected = model.selectedWaveformSource, visibleTracks.contains(where: { $0.id == selected }) {

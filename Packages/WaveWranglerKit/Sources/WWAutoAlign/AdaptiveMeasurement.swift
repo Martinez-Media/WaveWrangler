@@ -191,14 +191,18 @@ extension AdaptiveAlignment {
         reference: EstimatorTrack, target: EstimatorTrack, station: Int,
         predictedOffset: Double, deviation: Double, rateRatio: Double = 1
     ) throws -> [DelayEvidence] {
+        var broadPreparation: AutomaticAlignment.PreparedSignals?
         let broad = try measureBand(reference: reference, target: target, station: station,
-            predictedOffset: predictedOffset, deviation: deviation, rateRatio: rateRatio, upperSpeech: false)
+            predictedOffset: predictedOffset, deviation: deviation, rateRatio: rateRatio, upperSpeech: false,
+            preparation: &broadPreparation)
         var measured = broad
         if broad.contains(where: {
             ["inconsistentSubwindows", "inconsistentMethods"].contains($0.status) && $0.nccScore >= 0.6
         }) {
+            var upperPreparation: AutomaticAlignment.PreparedSignals?
             let upper = try measureBand(reference: reference, target: target, station: station,
-                predictedOffset: predictedOffset, deviation: deviation, rateRatio: rateRatio, upperSpeech: true)
+                predictedOffset: predictedOffset, deviation: deviation, rateRatio: rateRatio, upperSpeech: true,
+                preparation: &upperPreparation)
             guard upper.count == broad.count else {
                 throw AlignEstimateError.invalidParameter("spectral measurements changed the source window grid")
             }
@@ -227,7 +231,7 @@ extension AdaptiveAlignment {
         guard measured.contains(where: needsShorterWindow) else { return measured }
         let shorter = try measureBand(reference: reference, target: target, station: station,
             predictedOffset: predictedOffset, deviation: deviation, rateRatio: rateRatio,
-            upperSpeech: false, windowSeconds: 1)
+            upperSpeech: false, windowSeconds: 1, preparation: &broadPreparation)
         guard shorter.count == measured.count else {
             throw AlignEstimateError.invalidParameter("short measurements changed the source window grid")
         }
@@ -245,15 +249,25 @@ extension AdaptiveAlignment {
         predictedOffset: Double, deviation: Double, rateRatio: Double, upperSpeech: Bool,
         windowSeconds: Double = AutomaticAlignment.windowSeconds
     ) throws -> [DelayEvidence] {
+        var preparation: AutomaticAlignment.PreparedSignals?
+        return try measureBand(reference: reference, target: target, station: station,
+            predictedOffset: predictedOffset, deviation: deviation, rateRatio: rateRatio,
+            upperSpeech: upperSpeech, windowSeconds: windowSeconds, preparation: &preparation)
+    }
+
+    static func measureBand(
+        reference: EstimatorTrack, target: EstimatorTrack, station: Int,
+        predictedOffset: Double, deviation: Double, rateRatio: Double, upperSpeech: Bool,
+        windowSeconds: Double = AutomaticAlignment.windowSeconds,
+        preparation: inout AutomaticAlignment.PreparedSignals?
+    ) throws -> [DelayEvidence] {
         let full = try AutomaticAlignment.measure(
             reference: reference, target: target, station: station,
             predictedOffset: predictedOffset, deviation: deviation, rateRatio: rateRatio, upperSpeech: upperSpeech,
-            windowSeconds: windowSeconds
+            windowSeconds: windowSeconds, preparation: &preparation
         )
-        let r = try upperSpeech
-            ? Signal.upperSpeechBand(Signal(reference.buffer).samples) : Signal.speechBand(Signal(reference.buffer).samples)
-        let t = try upperSpeech
-            ? Signal.upperSpeechBand(Signal(target.buffer).samples) : Signal.speechBand(Signal(target.buffer).samples)
+        guard let preparation else { throw AlignEstimateError.invalidParameter("missing prepared signals") }
+        let r = preparation.reference, t = preparation.target
         return try full.map { observation in
             try Task.checkCancellation()
             var measured = observation

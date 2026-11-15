@@ -104,8 +104,8 @@ enum Acceptance {
     }
 
     static func waitFor(timeout: TimeInterval, _ condition: () -> Bool) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
+        let deadline = ContinuousClock.now + .seconds(timeout)
+        while ContinuousClock.now < deadline {
             if condition() { return true }
             Thread.sleep(forTimeInterval: 0.05)
         }

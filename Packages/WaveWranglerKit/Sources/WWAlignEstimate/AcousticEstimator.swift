@@ -18,7 +18,16 @@ public enum AcousticEstimator {
 
     /// Synchronous and CPU-bound; run it off the main thread.
     public static func estimate(_ request: EstimationRequest, parameters: EstimatorParameters = EstimatorParameters()) throws(AlignEstimateError) -> EstimationReport {
+        try estimate(request, parameters: parameters, isInterrupted: { false })
+    }
+
+    /// The caller owns interruption and joins the synchronous work before releasing admission.
+    package static func estimate(
+        _ request: EstimationRequest, parameters: EstimatorParameters = EstimatorParameters(),
+        isInterrupted: () -> Bool
+    ) throws(AlignEstimateError) -> EstimationReport {
         try parameters.validate()
+        if isInterrupted() { throw .interrupted }
         var seen: Set<RecordingEpochID> = []
         for track in request.tracks {
             guard track.epoch != request.reference.epoch else { throw .referenceEpochInTracks(track.epoch) }
@@ -33,16 +42,16 @@ public enum AcousticEstimator {
 
         let windowLength = Int((parameters.windowSeconds * parameters.proxyRate).rounded())
         var correlator = WindowCorrelator(parameters: parameters, windowLength: windowLength)
-        let reference = ProxySignal(buffer: request.reference.buffer, parameters: parameters)
+        let reference = try ProxySignal(buffer: request.reference.buffer, parameters: parameters, isInterrupted: isInterrupted)
         let referenceStart = request.reference.groupClockStart.approximateDouble
 
         var drafts: [Draft] = []
         for track in request.tracks {
-            var draft = try analyze(track, reference: reference, referenceStart: referenceStart, search: request.search, parameters: parameters, windowLength: windowLength, correlator: &correlator)
+            var draft = try analyze(track, reference: reference, referenceStart: referenceStart, search: request.search, parameters: parameters, windowLength: windowLength, correlator: &correlator, isInterrupted: isInterrupted)
             if (epochsPerGroup[track.group] ?? 0) > 1 { draft.flags.insert(.restartedEpoch) }
             drafts.append(draft)
         }
-        checkCycles(&drafts, parameters: parameters, correlator: &correlator)
+        try checkCycles(&drafts, parameters: parameters, correlator: &correlator, isInterrupted: isInterrupted)
         return EstimationReport(estimator: identifier(for: parameters), epochs: drafts.map(\.estimate))
     }
 
@@ -69,8 +78,8 @@ public enum AcousticEstimator {
         }
     }
 
-    private static func analyze(_ track: EstimatorTrack, reference: ProxySignal, referenceStart: Double, search: SearchRange, parameters: EstimatorParameters, windowLength nw: Int, correlator: inout WindowCorrelator) throws(AlignEstimateError) -> Draft {
-        let proxy = ProxySignal(buffer: track.buffer, parameters: parameters)
+    private static func analyze(_ track: EstimatorTrack, reference: ProxySignal, referenceStart: Double, search: SearchRange, parameters: EstimatorParameters, windowLength nw: Int, correlator: inout WindowCorrelator, isInterrupted: () -> Bool) throws(AlignEstimateError) -> Draft {
+        let proxy = try ProxySignal(buffer: track.buffer, parameters: parameters, isInterrupted: isInterrupted)
         let rate = Double(track.buffer.sampleRate)
         let fp = parameters.proxyRate
         let e = track.groupClockStart.approximateDouble
@@ -88,6 +97,7 @@ public enum AcousticEstimator {
         }
         var windows: [WindowMeasurement] = []
         for (index, start) in starts.enumerated() {
+            if isInterrupted() { throw .interrupted }
             let o = correlator.observe(target: proxy, targetStart: start, targetClockStart: e, reference: reference, referenceClockStart: referenceStart, predictedOffset: search.centerOffsetSeconds, deviation: search.maximumDeviationSeconds)
             windows.append(WindowMeasurement(index: index, groupClockCenter: e + (Double(start) + Double(nw) / 2) / fp, status: o.status, peakScore: o.peakScore, secondPeakScore: o.secondPeakScore, periodicityScore: o.periodicityScore, offsetSeconds: o.offsetSeconds))
         }
@@ -199,15 +209,17 @@ public enum AcousticEstimator {
     /// that the triangle (reference, i, j) closes. A failure abstains both epochs. Honest limit: one sound
     /// source heard with a constant delay per recorder still closes every triangle, so cycles cannot detect
     /// acoustic delay; they catch inconsistent pairwise solutions.
-    private static func checkCycles(_ drafts: inout [Draft], parameters: EstimatorParameters, correlator: inout WindowCorrelator) {
+    private static func checkCycles(_ drafts: inout [Draft], parameters: EstimatorParameters, correlator: inout WindowCorrelator, isInterrupted: () -> Bool) throws(AlignEstimateError) {
         let tolerance = parameters.cycleToleranceMilliseconds
         var failed: [Int: Double] = [:]
         for i in drafts.indices {
             for j in drafts.indices where j > i {
+                if isInterrupted() { throw .interrupted }
                 guard drafts[i].track.group != drafts[j].track.group, let mi = drafts[i].map, let mj = drafts[j].map else { continue }
                 var residuals: [Double] = []
                 let nw = correlator.windowLength
                 for start in drafts[j].windowStarts {
+                    if isInterrupted() { throw .interrupted }
                     let u0 = drafts[j].clockStart + Double(start) / parameters.proxyRate
                     let predicted = (mj.a * u0 + mj.b - mi.b) / mi.a - u0
                     let o = correlator.observe(target: drafts[j].proxy, targetStart: start, targetClockStart: drafts[j].clockStart, reference: drafts[i].proxy, referenceClockStart: drafts[i].clockStart, predictedOffset: predicted, deviation: cycleSearchSeconds)

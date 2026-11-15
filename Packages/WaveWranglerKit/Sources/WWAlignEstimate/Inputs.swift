@@ -16,6 +16,7 @@ import WWTimeMap
 // * Synchronous and CPU-bound: callers must run it off the main thread.
 
 public enum AlignEstimateError: Error, Equatable, Sendable {
+    case interrupted
     case invalidSampleRate(Int)
     case emptyBuffer
     case nonFiniteSample(index: Int)

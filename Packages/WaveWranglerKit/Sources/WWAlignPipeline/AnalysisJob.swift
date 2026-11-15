@@ -20,6 +20,7 @@ struct PipelineEnvironment: Sendable {
 #if DEBUG
 /// Test-only seams (DEBUG builds only).
 struct AlignmentPipelineTestHooks: Sendable {
+    var didReachEstimatorCheckpoint: (@Sendable () -> Void)?
     /// Counts canonical map serialization separately from live accepted-map admission.
     var didCalculateMapIdentity: (@Sendable () -> Void)?
     /// Called in a group render after a segment is rendered and verified, before its currency re-check and
@@ -275,7 +276,7 @@ struct AnalysisUnit: Sendable {
                     return try unit.estimate(
                         referenceSamples: referenceSamples, referenceParticipant: referenceParticipant,
                         targetSamples: targetSamples, targetParticipant: targetParticipant,
-                        peerTracks: peerTracks, recipe: unit.recipe(peers: peers).name
+                        peerTracks: peerTracks, recipe: unit.recipe(peers: peers).name, environment: environment
                     )
                 }
             } catch {
@@ -346,14 +347,21 @@ struct AnalysisUnit: Sendable {
     func estimate(
         referenceSamples: [Float], referenceParticipant: AnalysisParticipant,
         targetSamples: [Float], targetParticipant: AnalysisParticipant,
-        peerTracks: [EstimatorTrack] = [], recipe: String? = nil
+        peerTracks: [EstimatorTrack] = [], recipe: String? = nil, environment: PipelineEnvironment
     ) throws(AlignmentWorkFailure) -> EpochAnalysisRecord {
         let referenceTrack = try track(samples: referenceSamples, participant: referenceParticipant)
         let targetTrack = try track(samples: targetSamples, participant: targetParticipant)
         let report: EstimationReport
         do throws(AlignEstimateError) {
-            report = try AcousticEstimator.estimate(EstimationRequest(reference: referenceTrack, tracks: [targetTrack] + peerTracks, search: search))
+            report = try AcousticEstimator.estimate(EstimationRequest(reference: referenceTrack, tracks: [targetTrack] + peerTracks, search: search),
+                isInterrupted: {
+                    #if DEBUG
+                    environment.hooks.didReachEstimatorCheckpoint?()
+                    #endif
+                    return Task.isCancelled
+                })
         } catch {
+            if error == .interrupted { throw .canceled }
             throw .estimator(error)
         }
         guard let estimate = report.epochs.first(where: { $0.epoch == targetEpoch }) else {

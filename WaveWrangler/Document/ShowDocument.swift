@@ -1223,8 +1223,15 @@ final class ShowDocument: NSDocument {
     /// another crashed session) and problem reports stay and are offered next.
     func discardOfferedEditCheckpoint() {
         guard let candidate = status.editCheckpointOffer?.candidate else { return }
-        try? recovery.discardOfferedEditCheckpoints([candidate.url], for: documentKey)
-        refreshEditCheckpointOffer()
+        let recovery = recovery, key = documentKey
+        ShowPersistenceLane.enqueue { [weak self] in
+            let result = Result { try recovery.discardOfferedEditCheckpoints([candidate.url], for: key) }
+            Task { @MainActor [weak self] in
+                guard let self, !self.persistenceClosed, self.documentKey == key else { return }
+                if case let .failure(error) = result { self.presentError(error) }
+                self.refreshEditCheckpointOfferInBackground()
+            }
+        }
     }
 
     /// Hides the "couldn't be restored" report in this window (after confirmation). Nothing is deleted.

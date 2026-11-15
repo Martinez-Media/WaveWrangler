@@ -140,14 +140,41 @@ public enum AutomaticAlignment {
         reference: EstimatorTrack, target: EstimatorTrack, station: Int,
         predictedOffset: Double, deviation: Double, rateRatio: Double = 1
     ) throws -> [DelayEvidence] {
-        try measure(reference: reference, target: target, station: station, predictedOffset: predictedOffset,
-                    deviation: deviation, rateRatio: rateRatio, upperSpeech: false)
+        var preparation: PreparedSignals?
+        return try measure(reference: reference, target: target, station: station, predictedOffset: predictedOffset,
+                    deviation: deviation, rateRatio: rateRatio, upperSpeech: false, preparation: &preparation)
+    }
+
+    struct PreparedSignals {
+        let rawReference: [Double]
+        let rawTarget: [Double]
+        let reference: [Double]
+        let target: [Double]
+
+        init(reference: EstimatorTrack, target: EstimatorTrack, upperSpeech: Bool) throws {
+            let r = try Signal(reference.buffer), t = try Signal(target.buffer)
+            rawReference = r.samples
+            rawTarget = t.samples
+            self.reference = try upperSpeech ? Signal.upperSpeechBand(r.samples) : Signal.speechBand(r.samples)
+            self.target = try upperSpeech ? Signal.upperSpeechBand(t.samples) : Signal.speechBand(t.samples)
+        }
     }
 
     static func measure(
         reference: EstimatorTrack, target: EstimatorTrack, station: Int,
         predictedOffset: Double, deviation: Double, rateRatio: Double, upperSpeech: Bool,
         windowSeconds: Double = AutomaticAlignment.windowSeconds
+    ) throws -> [DelayEvidence] {
+        var preparation: PreparedSignals?
+        return try measure(reference: reference, target: target, station: station,
+            predictedOffset: predictedOffset, deviation: deviation, rateRatio: rateRatio,
+            upperSpeech: upperSpeech, windowSeconds: windowSeconds, preparation: &preparation)
+    }
+
+    static func measure(
+        reference: EstimatorTrack, target: EstimatorTrack, station: Int,
+        predictedOffset: Double, deviation: Double, rateRatio: Double, upperSpeech: Bool,
+        windowSeconds: Double = AutomaticAlignment.windowSeconds, preparation: inout PreparedSignals?
     ) throws -> [DelayEvidence] {
         guard target.buffer.durationSeconds <= stationSeconds + 0.01,
               reference.buffer.durationSeconds <= 60, predictedOffset.isFinite,
@@ -157,12 +184,12 @@ public enum AutomaticAlignment {
               (0..<stationCount).contains(station) else {
             throw AlignEstimateError.invalidParameter("fine search exceeds bounded station envelope")
         }
-        let r = try Signal(reference.buffer), t = try Signal(target.buffer)
-        let referenceSamples = try upperSpeech ? Signal.upperSpeechBand(r.samples) : Signal.speechBand(r.samples)
-        let targetSamples = try upperSpeech ? Signal.upperSpeechBand(t.samples) : Signal.speechBand(t.samples)
+        let prepared = try preparation ?? PreparedSignals(reference: reference, target: target, upperSpeech: upperSpeech)
+        preparation = prepared
+        let referenceSamples = prepared.reference, targetSamples = prepared.target
         let n = Int(windowSeconds * Signal.rate)
         let anchorCount = Int(Self.windowSeconds * Signal.rate)
-        let available = Double(t.samples.count - 1) - Double(anchorCount - 1) / rateRatio
+        let available = Double(targetSamples.count - 1) - Double(anchorCount - 1) / rateRatio
         guard available >= 0 else { return [] }
         var evidence: [DelayEvidence] = []
         var cachedTransform: Transform?
@@ -177,7 +204,7 @@ public enum AutomaticAlignment {
                 throw AlignEstimateError.invalidParameter("fine search coordinate")
             }
             let lo = max(0, Int(floor(expected - deviation * Signal.rate)))
-            let hi = min(r.samples.count, Int(ceil(expected + deviation * Signal.rate)) + n + 1)
+            let hi = min(referenceSamples.count, Int(ceil(expected + deviation * Signal.rate)) + n + 1)
             guard hi - lo >= n + 3 else {
                 evidence.append(DelayEvidence(station: station, attempt: attempt, targetCenter: targetCenter, status: "noReference", offsetSeconds: nil, nccScore: 0, nccSecond: 0, phatOffsetSeconds: nil, phatPeakRatio: nil, method: fineMethod))
                 continue
@@ -215,10 +242,10 @@ public enum AutomaticAlignment {
                 + windowSeconds / 2 - targetCenter
             let phatRatio = phat.value > 0 ? phat.second / phat.value : 1
             var status = "eligible"
-            if Statistics.rms(Array(t.samples[start..<min(t.samples.count, start + n)])) < 1e-4 {
+            if Statistics.rms(Array(prepared.rawTarget[start..<min(prepared.rawTarget.count, start + n)])) < 1e-4 {
                 let predicted = Int(expected.rounded()) - lo
-                let shared = predicted >= 0 && lo + predicted + n <= r.samples.count
-                    && Statistics.rms(Array(r.samples[lo + predicted..<lo + predicted + n])) < 1e-4
+                let shared = predicted >= 0 && lo + predicted + n <= prepared.rawReference.count
+                    && Statistics.rms(Array(prepared.rawReference[lo + predicted..<lo + predicted + n])) < 1e-4
                 status = shared ? "sharedSilence" : "silent"
             }
             else if peak.value < 0.35 { status = "weak" }

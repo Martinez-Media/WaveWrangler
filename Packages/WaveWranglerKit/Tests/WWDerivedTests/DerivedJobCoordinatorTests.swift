@@ -38,6 +38,375 @@ struct DerivedJobCoordinatorTests {
         DerivedJobCoordinator(store: try makeStore(directory), inputs: inputs, testHooks: hooks)
     }
 
+    func disposableKey(_ index: Int, upstream: [DerivedAssetKey] = []) -> DerivedAssetKey {
+        var result = key(channel: index)
+        result.recipe = RecipeReference(name: "listening-tile/\(index)", revision: 1)
+        result.setUpstream(upstream)
+        return result
+    }
+
+    @Test func disposableChurnRetiresMetadataAndReusesVerifiedFiles() async throws {
+        let directory = try TemporaryDirectory("disposable-churn")
+        let coordinator = try coordinator(directory)
+        for index in 0..<160 {
+            let slot = DerivedSlot("listening/\(index)"), key = disposableKey(index)
+            let payload = Data("tile-\(index)".utf8)
+            try await coordinator.withDisposableSlot(slot, key: key) {
+                #expect(await coordinator.submit(slot, key: key) { payload }.outcome == .published(key))
+                #expect(await coordinator.readyPayload(for: slot, matching: key) == payload)
+            }
+            let counts = await coordinator.disposableMetadataCounts
+            #expect(counts.slots == 0 && counts.recipes == 0 && counts.consumers == 0)
+            #expect(await coordinator.state(of: slot) == .idle)
+            #expect(coordinator.store.payload(for: key) == payload)
+        }
+        let slot = DerivedSlot("listening/0"), key = disposableKey(0)
+        try await coordinator.withDisposableSlot(slot, key: key) {
+            #expect(await coordinator.submit(slot, key: key) {
+                Issue.record("Retiring metadata must not discard verified tile files")
+                return Data()
+            }.outcome == .reused(key))
+            #expect(await coordinator.readyPayload(for: slot, matching: key) == Data("tile-0".utf8))
+        }
+        await coordinator.shutdown()
+    }
+
+    @Test func disposableOwnershipCannotAdoptCanonicalSlotsOrRecipes() async throws {
+        let directory = try TemporaryDirectory("disposable-ownership")
+        let coordinator = try coordinator(directory)
+        let key = key()
+        #expect(await coordinator.submit(slot, key: key) { Data([1]) }.outcome == .published(key))
+        for candidate in [slot, DerivedSlot("new-slot-with-canonical-recipe")] {
+            await #expect(throws: DisposableDerivedFailure.ownershipConflict) {
+                try await coordinator.withDisposableSlot(candidate, key: key) {
+                    Issue.record("Disposable ownership must not take over canonical state")
+                }
+            }
+        }
+        #expect(await coordinator.readyPayload(for: slot, matching: key) == Data([1]))
+        #expect(await coordinator.inputs.recipes["align"] == 1)
+        let counts = await coordinator.disposableMetadataCounts
+        #expect(counts.slots == 0 && counts.recipes == 0 && counts.consumers == 0)
+        await coordinator.shutdown()
+    }
+
+    @Test(arguments: [false, true])
+    func disposableInvalidationRemovesUnsafeFilesOrFailsVisiblyAndRetries(refuseRemoval: Bool) async throws {
+        let directory = try TemporaryDirectory("disposable-invalidated")
+        let coordinator = try coordinator(directory)
+        let slot = DerivedSlot("invalidated"), key = disposableKey(0)
+        let assets = coordinator.store.assetsDirectory
+        defer { chmod(assets.path, 0o755) }
+        @Sendable func publishAndInvalidate() async throws {
+            try await coordinator.withDisposableSlot(slot, key: key) {
+                #expect(await coordinator.submit(slot, key: key) { Data([1]) }.outcome == .published(key))
+                await coordinator.invalidate(slot)
+                if refuseRemoval { #expect(chmod(assets.path, 0o555) == 0) }
+            }
+        }
+        if refuseRemoval {
+            await #expect(throws: DisposableDerivedFailure.self) { try await publishAndInvalidate() }
+            let counts = await coordinator.disposableMetadataCounts
+            #expect(counts.slots == 1 && counts.keys == 1 && counts.recipes == 1 && counts.consumers == 0)
+            let failed: Bool = if case .failed = await coordinator.state(of: slot) { true } else { false }
+            #expect(failed)
+            #expect(coordinator.store.payload(for: key) == Data([1]))
+            #expect(chmod(assets.path, 0o755) == 0)
+        } else {
+            try await publishAndInvalidate()
+            #expect(coordinator.store.payload(for: key) == nil)
+        }
+        let runs = Counter()
+        try await coordinator.withDisposableSlot(slot, key: key) {
+            #expect(await coordinator.submit(slot, key: key) {
+                runs.increment()
+                return Data([1])
+            }.outcome == .published(key))
+        }
+        #expect(runs.value == 1, "Retired explicit invalidation cannot revive the old cached payload")
+        let after = await coordinator.disposableMetadataCounts
+        #expect(after.slots == 0 && after.keys == 0 && after.recipes == 0 && after.consumers == 0)
+        await coordinator.shutdown()
+    }
+
+    @Test func disposableInvalidationCannotDeleteAnotherReadyOwnersPayload() async throws {
+        let directory = try TemporaryDirectory("disposable-shared-invalidation")
+        let coordinator = try coordinator(directory)
+        let slot = DerivedSlot("disposable"), key = disposableKey(0)
+        let other = DerivedSlot("ordinary-owner")
+        try await coordinator.withDisposableSlot(slot, key: key) {
+            _ = await coordinator.submit(slot, key: key) { Data([1]) }.outcome
+            #expect(await coordinator.submit(other, key: key) { Data() }.outcome == .reused(key))
+            await coordinator.invalidate(slot)
+        }
+        #expect(await coordinator.readyPayload(for: other, matching: key) == Data([1]))
+        #expect(await coordinator.readyPayload(for: slot, matching: key) == nil)
+        let held = await coordinator.disposableMetadataCounts
+        #expect(held.slots == 1 && held.keys == 1 && held.consumers == 0)
+        await coordinator.invalidate(other)
+        #expect(coordinator.store.payload(for: key) == nil)
+        #expect(await coordinator.state(of: slot) == .idle)
+        await coordinator.shutdown()
+    }
+
+    @Test(arguments: [false, true])
+    func disposableInvalidationPreservesOrdinaryHistory(rekey: Bool) async throws {
+        let directory = try TemporaryDirectory("disposable-shared-history")
+        let coordinator = try coordinator(directory)
+        let slot = DerivedSlot("disposable"), first = disposableKey(0)
+        let other = DerivedSlot("ordinary-owner")
+        var changed = key(mapRevision: 2)
+        changed.recipe = first.recipe
+        let second = changed
+        try await coordinator.withDisposableSlot(slot, key: first) {
+            _ = await coordinator.submit(slot, key: first) { Data([1]) }.outcome
+            #expect(await coordinator.submit(other, key: first) { Data() }.outcome == .reused(first))
+            await coordinator.acceptMap(MapRevisionReference(episode: episode, revision: 2))
+            if rekey {
+                #expect(await coordinator.submit(other, key: second) { Data([2]) }.outcome == .published(second))
+            }
+            await coordinator.invalidate(slot)
+        }
+        #expect(coordinator.store.payload(for: first) == Data([1]))
+        let held = await coordinator.disposableMetadataCounts
+        #expect(held.slots == 1 && held.keys == 1 && held.consumers == 0)
+        await coordinator.acceptMap(MapRevisionReference(episode: episode, revision: 1))
+        await coordinator.restoreCachedCurrentSlots()
+        #expect(await coordinator.readyPayload(for: other, matching: first) == Data([1]))
+        #expect(await coordinator.readyPayload(for: slot, matching: first) == nil)
+        await coordinator.invalidate(other)
+        #expect(coordinator.store.payload(for: first) == nil)
+        #expect(await coordinator.state(of: slot) == .idle)
+        await coordinator.shutdown()
+    }
+
+    @Test func oneRecipeCannotAccumulateUnboundedInvalidatedSourceKeys() async throws {
+        let directory = try TemporaryDirectory("disposable-key-bound")
+        let coordinator = try coordinator(directory)
+        let slot = DerivedSlot("one-tile"), original = disposableKey(0)
+        let ready = Latch(), release = Latch()
+        let held = Task {
+            try await coordinator.withDisposableSlot(slot, key: original) {
+                _ = await coordinator.submit(slot, key: original) { Data([1]) }.outcome
+                await coordinator.invalidate(slot)
+                await ready.open()
+                await release.wait()
+            }
+        }
+        await ready.wait()
+        let limit = DerivedJobCoordinator.maximumDisposableMetadataEntries
+        for index in 1..<limit {
+            let revision = SourceRevision(source: source, token: "generation-\(index)")
+            await coordinator.updateSource(revision)
+            var changed = disposableKey(0)
+            changed.setSources([revision])
+            let key = changed
+            try await coordinator.withDisposableSlot(slot, key: key) {
+                _ = await coordinator.submit(slot, key: key) { Data([1]) }.outcome
+                await coordinator.invalidate(slot)
+            }
+        }
+        let counts = await coordinator.disposableMetadataCounts
+        #expect(counts.slots == 1 && counts.keys == limit && counts.recipes == 1 && counts.consumers == 1)
+        let revision = SourceRevision(source: source, token: "generation-\(limit)")
+        await coordinator.updateSource(revision)
+        var changed = disposableKey(0)
+        changed.setSources([revision])
+        let next = changed
+        await #expect(throws: DisposableDerivedFailure.capacityExceeded) {
+            try await coordinator.withDisposableSlot(slot, key: next) {
+                Issue.record("Recipe-name reuse must not bypass the full-key metadata bound")
+            }
+        }
+        await release.open()
+        try await held.value
+        let released = await coordinator.disposableMetadataCounts
+        #expect(released.slots == 0 && released.keys == 0 && released.recipes == 0 && released.consumers == 0)
+        try await coordinator.withDisposableSlot(slot, key: next) {
+            #expect(await coordinator.submit(slot, key: next) { Data([1]) }.outcome == .published(next))
+        }
+        await coordinator.shutdown()
+    }
+
+    @Test func heldDisposableConsumerSurvivesChurnAndCancellationReleasesItsMetadata() async throws {
+        let directory = try TemporaryDirectory("disposable-consumer")
+        let coordinator = try coordinator(directory)
+        let slot = DerivedSlot("held"), key = disposableKey(-1)
+        let ready = Latch(), release = Latch()
+        let consumer = Task {
+            try await coordinator.withDisposableSlot(slot, key: key) {
+                #expect(await coordinator.submit(slot, key: key) { Data("held".utf8) }.outcome == .published(key))
+                await ready.open()
+                await release.wait()
+                #expect(await coordinator.readyPayload(for: slot, matching: key) == Data("held".utf8))
+            }
+        }
+        await ready.wait()
+        for index in 0..<100 {
+            let next = DerivedSlot("churn/\(index)"), nextKey = disposableKey(index)
+            try await coordinator.withDisposableSlot(next, key: nextKey) {
+                _ = await coordinator.submit(next, key: nextKey) { Data([1]) }.outcome
+            }
+        }
+        let heldCounts = await coordinator.disposableMetadataCounts
+        #expect(heldCounts.slots == 1 && heldCounts.recipes == 1 && heldCounts.consumers == 1)
+        consumer.cancel()
+        await release.open()
+        await #expect(throws: CancellationError.self) { try await consumer.value }
+        let released = await coordinator.disposableMetadataCounts
+        #expect(released.slots == 0 && released.recipes == 0 && released.consumers == 0)
+        await coordinator.shutdown()
+    }
+
+    @Test func liveUpstreamDependenciesPinDisposableMetadataUntilInvalidation() async throws {
+        let directory = try TemporaryDirectory("disposable-dependencies")
+        let coordinator = try coordinator(directory)
+        let parent = DerivedSlot("held-upstream"), parentKey = disposableKey(-1)
+        let child = DerivedSlot("dependent"), childKey = key(kind: "onsets", upstream: [parentKey])
+        try await coordinator.withDisposableSlot(parent, key: parentKey) {
+            #expect(await coordinator.submit(parent, key: parentKey) { Data([1]) }.outcome == .published(parentKey))
+            #expect(await coordinator.submit(child, key: childKey) { Data([2]) }.outcome == .published(childKey))
+        }
+        for index in 0..<100 {
+            let slot = DerivedSlot("churn/\(index)"), key = disposableKey(index)
+            try await coordinator.withDisposableSlot(slot, key: key) {
+                _ = await coordinator.submit(slot, key: key) { Data([3]) }.outcome
+            }
+        }
+        #expect(await coordinator.readyPayload(for: parent, matching: parentKey) == Data([1]))
+        #expect(await coordinator.readyPayload(for: child, matching: childKey) == Data([2]))
+        let pinned = await coordinator.disposableMetadataCounts
+        #expect(pinned.slots == 1 && pinned.recipes == 1 && pinned.consumers == 0)
+        await coordinator.invalidate(child)
+        let released = await coordinator.disposableMetadataCounts
+        #expect(released.slots == 0 && released.recipes == 0)
+        #expect(await coordinator.staleReasons(for: childKey).contains(.upstreamChanged))
+        await coordinator.shutdown()
+    }
+
+    @Test func pinnedDisposableMetadataHasAnExplicitAdmissionBoundAndRetry() async throws {
+        let directory = try TemporaryDirectory("disposable-bound")
+        let coordinator = try coordinator(directory)
+        let limit = DerivedJobCoordinator.maximumDisposableMetadataEntries
+        for index in 0..<limit {
+            let parent = DerivedSlot("parent/\(index)"), parentKey = disposableKey(index)
+            let child = DerivedSlot("child/\(index)"), childKey = key(kind: "onsets", upstream: [parentKey])
+            try await coordinator.withDisposableSlot(parent, key: parentKey) {
+                _ = await coordinator.submit(parent, key: parentKey) { Data([1]) }.outcome
+                _ = await coordinator.submit(child, key: childKey) { Data([2]) }.outcome
+            }
+        }
+        let counts = await coordinator.disposableMetadataCounts
+        #expect(counts.slots == limit && counts.recipes == limit && counts.consumers == 0)
+        let next = DerivedSlot("overflow"), nextKey = disposableKey(limit)
+        let nextRecipe = try #require(nextKey.recipe)
+        await #expect(throws: DisposableDerivedFailure.capacityExceeded) {
+            try await coordinator.withDisposableSlot(next, key: nextKey) {
+                Issue.record("Full pinned metadata must refuse before work or registration")
+            }
+        }
+        #expect(await coordinator.state(of: next) == .idle)
+        #expect(await coordinator.inputs.recipes[nextRecipe.name] == nil)
+        await coordinator.invalidate(DerivedSlot("child/0"))
+        try await coordinator.withDisposableSlot(next, key: nextKey) {
+            #expect(await coordinator.submit(next, key: nextKey) { Data([3]) }.outcome == .published(nextKey))
+        }
+        let after = await coordinator.disposableMetadataCounts
+        #expect(after.slots == limit - 1 && after.recipes == limit - 1)
+        await coordinator.shutdown()
+    }
+
+    @Test func sharedDisposableSlotAlsoBoundsActiveConsumers() async throws {
+        let directory = try TemporaryDirectory("disposable-consumer-bound")
+        let coordinator = try coordinator(directory)
+        let slot = DerivedSlot("shared"), key = disposableKey(0)
+        @Sendable func hold(_ remaining: Int) async throws {
+            if remaining > 0 {
+                try await coordinator.withDisposableSlot(slot, key: key) {
+                    try await hold(remaining - 1)
+                }
+            } else {
+                let counts = await coordinator.disposableMetadataCounts
+                #expect(counts.slots == 1 && counts.recipes == 1)
+                #expect(counts.consumers == DerivedJobCoordinator.maximumDisposableMetadataEntries)
+                await #expect(throws: DisposableDerivedFailure.capacityExceeded) {
+                    try await coordinator.withDisposableSlot(slot, key: key) {
+                        Issue.record("Same-key consumers must not bypass the shared admission bound")
+                    }
+                }
+            }
+        }
+        try await hold(DerivedJobCoordinator.maximumDisposableMetadataEntries)
+        let after = await coordinator.disposableMetadataCounts
+        #expect(after.slots == 0 && after.recipes == 0 && after.consumers == 0)
+        await coordinator.shutdown()
+    }
+
+    @Test func releasingATerminalConsumerRetiresItsDisposableDependencyChain() async throws {
+        let directory = try TemporaryDirectory("disposable-chain")
+        let coordinator = try coordinator(directory)
+        let first = DerivedSlot("first"), firstKey = disposableKey(0)
+        let middle = DerivedSlot("middle"), middleKey = disposableKey(1, upstream: [firstKey])
+        let last = DerivedSlot("last"), lastKey = disposableKey(2, upstream: [middleKey])
+        let ready = Latch(), release = Latch()
+        let terminal = try await coordinator.withDisposableSlot(first, key: firstKey) {
+            _ = await coordinator.submit(first, key: firstKey) { Data([1]) }.outcome
+            return try await coordinator.withDisposableSlot(middle, key: middleKey) {
+                _ = await coordinator.submit(middle, key: middleKey) { Data([2]) }.outcome
+                let terminal = Task {
+                    try await coordinator.withDisposableSlot(last, key: lastKey) {
+                        _ = await coordinator.submit(last, key: lastKey) { Data([3]) }.outcome
+                        await ready.open()
+                        await release.wait()
+                        #expect(await coordinator.readyPayload(for: first, matching: firstKey) == Data([1]))
+                        #expect(await coordinator.readyPayload(for: middle, matching: middleKey) == Data([2]))
+                        #expect(await coordinator.readyPayload(for: last, matching: lastKey) == Data([3]))
+                    }
+                }
+                await ready.wait()
+                return terminal
+            }
+        }
+        let held = await coordinator.disposableMetadataCounts
+        #expect(held.slots == 3 && held.recipes == 3 && held.consumers == 1)
+        await release.open()
+        try await terminal.value
+        let after = await coordinator.disposableMetadataCounts
+        #expect(after.slots == 0 && after.recipes == 0 && after.consumers == 0)
+        await coordinator.shutdown()
+    }
+
+    @Test(arguments: [false, true])
+    func disposableMetadataWaitsForCanceledOrStaleWorkToFinish(invalidateSource: Bool) async throws {
+        let directory = try TemporaryDirectory("disposable-unfinished")
+        let coordinator = try coordinator(directory)
+        let slot = DerivedSlot("unfinished"), key = disposableKey(0)
+        let started = Latch(), release = Latch()
+        let consumer = Task {
+            try await coordinator.withDisposableSlot(slot, key: key) {
+                let job = await coordinator.submit(slot, key: key) {
+                    await started.open()
+                    await release.wait()
+                    return Data([1])
+                }
+                let outcome = await job.outcome
+                #expect(outcome == (invalidateSource ? .discardedStale([.sourceChanged(source)]) : .canceled))
+                #expect(await coordinator.readyPayload(for: slot, matching: key) == nil)
+            }
+        }
+        await started.wait()
+        if invalidateSource { await coordinator.updateSource(SourceRevision(source: source, token: "replacement")) }
+        else { await coordinator.cancel(slot) }
+        let held = await coordinator.disposableMetadataCounts
+        #expect(held.slots == 1 && held.recipes == 1 && held.consumers == 1)
+        await release.open()
+        try await consumer.value
+        let after = await coordinator.disposableMetadataCounts
+        #expect(after.slots == 0 && after.recipes == 0 && after.consumers == 0)
+        #expect(coordinator.store.payload(for: key) == nil)
+        await coordinator.shutdown()
+    }
+
     @MainActor
     @Test func workRunsOffTheMainThreadAndPublishes() async throws {
         let directory = try TemporaryDirectory("jobs")

@@ -51,6 +51,12 @@ The wrapper's specialized passes matter:
 `WW_ESTIMATOR_TESTS`, `WW_SEGMENT_TESTS`, `WW_PIPELINE_HEAVY_TESTS` and
 `WW_TIMING_TESTS` are not blanket permission to run unrelated experiments.
 Inspect `scripts/test.sh` for the maintained selectors and pass order.
+The ordinary package pass requires at least one actual passed-test identity,
+not a green run summary (which can include only skipped tests); each
+named timing pass requires its own passed identity. These checks use the existing
+Swift Testing console wording, not a fixed total or a zero-skip policy. Run
+`python3 scripts/test-required-passes.py` for stand-in empty/skip/failure controls
+and temporary-log cleanup; those controls do not execute product tests.
 
 For app adapters, use scheme `WaveWrangler`,
 `-only-testing:WaveWranglerTests`, `-parallel-testing-enabled NO`, an arm64 macOS
@@ -150,6 +156,11 @@ ordering tests; task creation or one yield does not establish admission order.
 Swift Testing `.serialized` serializes suite contents, not unrelated suites in
 the same process. For native readiness, prefer state/focus predicates while
 preserving intentional observation windows for no-retry/no-write behavior.
+Generated older package fixtures must explicitly choose the native **Update**
+action before edit/save scenarios. Inspectors and editor commands have different
+window owners: activate the editor through the public Window menu before testing
+Save or Close Show. Match actual native control identity/labels, not an identifier
+overridden by an enclosing SwiftUI accessibility wrapper.
 See [end-of-feature review](feature-review.md) for evidence classification and
 changed-contract review.
 

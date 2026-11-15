@@ -278,9 +278,10 @@ final class EpisodeAlignmentModel {
     }
     var primaryWaveformGroups: [AlignmentWaveformSpeakerGroup] {
         guard let episode = document?.store.residentModel.episode(episodeID) else { return [] }
+        let eligible = primaryWaveformSources
         return episode.speakerAssignments.compactMap { assignment in
             guard assignment.primaryConfirmation == .userConfirmed, let primary = assignment.primary,
-                  primaryWaveformSources.contains(primary.sourceID) else { return nil }
+                  eligible.contains(primary.sourceID) else { return nil }
             let tracks = waveformTracks.filter { $0.id == primary.sourceID }
             guard !tracks.isEmpty else { return nil }
             return AlignmentWaveformSpeakerGroup(id: assignment.speakerID, tracks: tracks)

@@ -90,6 +90,23 @@ public struct DerivedJob: Sendable {
     }
 }
 
+package enum DisposableDerivedFailure: LocalizedError, Sendable, Equatable {
+    case capacityExceeded
+    case ownershipConflict
+    case retirementFailed(String)
+
+    package var errorDescription: String? {
+        switch self {
+        case .capacityExceeded:
+            "Listening cache metadata is still in use. Stop another listening operation and try again."
+        case .ownershipConflict:
+            "Listening cache metadata overlaps another derived owner."
+        case let .retirementFailed(reason):
+            "Could not retire invalidated listening cache data: \(reason)"
+        }
+    }
+}
+
 #if DEBUG
 /// Test-only seams (DEBUG builds only).
 package struct DerivedCoordinatorTestHooks: Sendable {
@@ -134,13 +151,27 @@ public actor DerivedJobCoordinator {
     private var explicitlyInvalidated: [DerivedSlot: Set<DerivedAssetKey>] = [:]
     private var nextJobID: UInt64 = 0
     /// Every job that has not finished, including superseded or canceled ones whose work is still returning.
-    private var inFlight: [UInt64: Task<DerivedJobOutcome, Never>] = [:]
+    private struct InFlightJob {
+        let slot: DerivedSlot
+        let key: DerivedAssetKey
+        let task: Task<DerivedJobOutcome, Never>
+    }
+    private var inFlight: [UInt64: InFlightJob] = [:]
+    package static let maximumDisposableMetadataEntries = 64
+    private var disposableSlots: Set<DerivedSlot> = []
+    private var disposableKeys: Set<DerivedAssetKey> = []
+    private var disposableRecipes: Set<String> = []
+    private var disposableConsumers: [UUID: (slot: DerivedSlot, key: DerivedAssetKey)] = [:]
+    private var disposableRetirementFailures: [DerivedSlot: String] = [:]
     private var hasShutDown = false
 
     #if DEBUG
     private let hooks: DerivedCoordinatorTestHooks
     package private(set) var dependencyRefreshCount = 0
     package private(set) var readyDigestComputationCount = 0
+    package var disposableMetadataCounts: (slots: Int, keys: Int, recipes: Int, consumers: Int) {
+        (disposableSlots.count, disposableKeys.count, disposableRecipes.count, disposableConsumers.count)
+    }
     #endif
 
     private struct SlotRecord {
@@ -170,7 +201,7 @@ public actor DerivedJobCoordinator {
     #endif
 
     deinit {
-        for task in inFlight.values { task.cancel() }
+        for job in inFlight.values { job.task.cancel() }
         continuation.finish()
     }
 
@@ -180,7 +211,7 @@ public actor DerivedJobCoordinator {
     /// before releasing source access — see the type's lifetime note.
     public func shutdown() async {
         hasShutDown = true
-        let jobs = inFlight.values
+        let jobs = inFlight.values.map(\.task)
         for task in jobs { task.cancel() }
         for slot in slots.keys.sorted(by: { $0.name < $1.name }) {
             guard var record = slots[slot] else { continue }
@@ -197,6 +228,49 @@ public actor DerivedJobCoordinator {
     }
 
     public var isShutdown: Bool { hasShutDown }
+
+    /// Holds disposable metadata until the consumer has copied its current payload. Live upstream
+    /// dependencies and unfinished jobs also pin it; verified cache files outlive the metadata.
+    package func withDisposableSlot<Value: Sendable>(
+        _ slot: DerivedSlot,
+        key: DerivedAssetKey,
+        consume: @Sendable () async throws -> Value
+    ) async throws -> Value {
+        try Task.checkCancellation()
+        guard !hasShutDown else { throw CancellationError() }
+        retireUnusedDisposableMetadata()
+        if let failure = disposableRetirementFailures[slot] { throw DisposableDerivedFailure.retirementFailed(failure) }
+        guard (slots[slot] == nil || disposableSlots.contains(slot)),
+              key.recipe.map({ inputs.recipes[$0.name] == nil || disposableRecipes.contains($0.name) }) ?? true
+        else { throw DisposableDerivedFailure.ownershipConflict }
+        let limit = Self.maximumDisposableMetadataEntries
+        guard disposableConsumers.count < limit,
+              disposableSlots.contains(slot) || disposableSlots.count < limit,
+              disposableKeys.contains(key) || disposableKeys.count < limit,
+              key.recipe.map({ disposableRecipes.contains($0.name) || disposableRecipes.count < limit }) ?? true
+        else { throw DisposableDerivedFailure.capacityExceeded }
+        let consumer = UUID()
+        disposableConsumers[consumer] = (slot, key)
+        disposableSlots.insert(slot)
+        disposableKeys.insert(key)
+        if let recipe = key.recipe {
+            disposableRecipes.insert(recipe.name)
+            setRecipe(recipe)
+        }
+        let value: Value
+        do {
+            value = try await consume()
+            try Task.checkCancellation()
+        } catch {
+            disposableConsumers[consumer] = nil
+            retireUnusedDisposableMetadata()
+            throw error
+        }
+        disposableConsumers[consumer] = nil
+        retireUnusedDisposableMetadata()
+        if let failure = disposableRetirementFailures[slot] { throw DisposableDerivedFailure.retirementFailed(failure) }
+        return value
+    }
 
     // MARK: - Inputs
 
@@ -306,6 +380,11 @@ public actor DerivedJobCoordinator {
         work: @escaping @Sendable () async throws -> Data
     ) -> DerivedJob {
         guard !hasShutDown else { return DerivedJob(slot: slot, key: key, task: Task { .canceled }) }
+        guard !disposableSlots.contains(slot) || disposableKeys.contains(key) else {
+            return DerivedJob(slot: slot, key: key, task: Task {
+                .failed(DisposableDerivedFailure.ownershipConflict.localizedDescription)
+            })
+        }
         var record = slots[slot] ?? SlotRecord()
         record.task?.cancel()
         nextJobID += 1
@@ -354,12 +433,13 @@ public actor DerivedJobCoordinator {
             }
             return await self.commit(jobID, slot: slot, staged: staged)
         }
-        inFlight[jobID] = task
+        inFlight[jobID] = InFlightJob(slot: slot, key: key, task: task)
         record.task = task
         record.currentJob = jobID
         record.state = .running(key)
         setRecord(record, for: slot)
         continuation.yield(DerivedSlotChange(slot: slot, state: record.state))
+        retireUnusedDisposableMetadata()
         refresh()
         return DerivedJob(slot: slot, key: key, task: task, identifier: jobID)
     }
@@ -378,6 +458,7 @@ public actor DerivedJobCoordinator {
         record.state = .canceled(key)
         setRecord(record, for: slot)
         continuation.yield(DerivedSlotChange(slot: slot, state: record.state))
+        retireUnusedDisposableMetadata()
     }
 
     /// Re-adopts cached results that match the current inputs after an intentional history move such as
@@ -407,6 +488,7 @@ public actor DerivedJobCoordinator {
                 changed = true
             }
         }
+        retireUnusedDisposableMetadata()
     }
 
     // MARK: - Completion (each is one synchronous actor turn)
@@ -414,6 +496,7 @@ public actor DerivedJobCoordinator {
     /// Currency check and publication with no suspension point in between.
     private func commit(_ jobID: UInt64, slot: DerivedSlot, staged: StagedDerivedAsset) -> DerivedJobOutcome {
         inFlight[jobID] = nil
+        defer { retireUnusedDisposableMetadata() }
         var skipCheck = false
         #if DEBUG
         skipCheck = hooks.skipCurrencyCheck
@@ -447,6 +530,7 @@ public actor DerivedJobCoordinator {
 
     private func adoptCached(_ jobID: UInt64, slot: DerivedSlot, key: DerivedAssetKey) -> DerivedJobOutcome {
         inFlight[jobID] = nil
+        defer { retireUnusedDisposableMetadata() }
         if let refusal = refusal(jobID, slot: slot, key: key) { return refusal }
         guard var record = slots[slot] else { return .discardedStale([.superseded]) }
         record.state = .ready(key)
@@ -459,6 +543,7 @@ public actor DerivedJobCoordinator {
 
     private func finishWithoutPublishing(_ jobID: UInt64, slot: DerivedSlot, key: DerivedAssetKey, failure: String?) -> DerivedJobOutcome {
         inFlight[jobID] = nil
+        defer { retireUnusedDisposableMetadata() }
         if let refusal = refusal(jobID, slot: slot, key: key) { return refusal }
         let state: DerivedSlotState = failure.map { .failed(key, reason: $0) } ?? .canceled(key)
         guard var record = slots[slot] else { return .discardedStale([.superseded]) }
@@ -554,6 +639,73 @@ public actor DerivedJobCoordinator {
                     changed = true
                 }
             }
+        }
+        retireUnusedDisposableMetadata()
+    }
+
+    private func retireUnusedDisposableMetadata() {
+        guard !disposableSlots.isEmpty || !disposableRecipes.isEmpty else { return }
+        let held = Set(disposableConsumers.values.map(\.slot)).union(inFlight.values.map(\.slot))
+        let unfinished = Set(inFlight.values.map(\.key))
+        let ordinaryHistory = Set(slots.flatMap { slot, record -> [DerivedAssetKey] in
+            guard !disposableSlots.contains(slot) else { return [] }
+            let keys = [record.state.key].compactMap { $0 } + (cachedCandidates[slot] ?? [])
+            return keys.filter { !(explicitlyInvalidated[slot]?.contains($0) ?? false) }
+        })
+        var removed = true
+        while removed, !disposableSlots.isEmpty {
+            removed = false
+            let upstream = Set(slots.values.flatMap { record -> [String] in
+                switch record.state {
+                case .ready, .running: return record.state.key?.upstream ?? []
+                default: return []
+                }
+            })
+            for slot in disposableSlots.sorted(by: { $0.name < $1.name }) {
+                guard !held.contains(slot),
+                      slots[slot]?.readyDigest.map({ !upstream.contains($0) }) ?? true else { continue }
+                let invalidated = explicitlyInvalidated[slot] ?? []
+                guard invalidated.allSatisfy({
+                    readyDigestCounts[$0.digest] == nil && !unfinished.contains($0) && !ordinaryHistory.contains($0)
+                })
+                else { continue }
+                do {
+                    for key in invalidated {
+                        try store.removePreparedEntry(key)
+                        explicitlyInvalidated[slot]?.remove(key)
+                        cachedCandidates[slot]?.removeAll { $0 == key }
+                    }
+                } catch {
+                    let reason = error.localizedDescription
+                    disposableRetirementFailures[slot] = reason
+                    if var record = slots[slot], let key = record.state.key {
+                        record.state = .failed(key, reason: DisposableDerivedFailure.retirementFailed(reason).localizedDescription)
+                        setRecord(record, for: slot)
+                        continuation.yield(DerivedSlotChange(slot: slot, state: record.state))
+                    }
+                    continue
+                }
+                disposableRetirementFailures[slot] = nil
+                if let digest = slots.removeValue(forKey: slot)?.readyDigest, let count = readyDigestCounts[digest] {
+                    readyDigestCounts[digest] = count > 1 ? count - 1 : nil
+                }
+                cachedCandidates[slot] = nil
+                explicitlyInvalidated[slot] = nil
+                disposableSlots.remove(slot)
+                continuation.yield(DerivedSlotChange(slot: slot, state: .idle))
+                removed = true
+            }
+        }
+        let keys = slots.values.compactMap(\.state.key)
+            + cachedCandidates.values.flatMap { $0 }
+            + explicitlyInvalidated.values.flatMap { $0 }
+            + disposableConsumers.values.map(\.key)
+            + inFlight.values.map(\.key)
+        let referenced = Set(keys.compactMap { $0.recipe?.name })
+        disposableKeys.formIntersection(Set(keys))
+        for name in disposableRecipes where !referenced.contains(name) {
+            inputs.recipes[name] = nil
+            disposableRecipes.remove(name)
         }
     }
 }

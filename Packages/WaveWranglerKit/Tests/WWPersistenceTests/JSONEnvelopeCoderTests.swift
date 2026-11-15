@@ -144,6 +144,36 @@ struct JSONEnvelopeCoderTests {
         #expect(throws: PersistenceError.unrecognizedContent) { try coder.decode(data(nested)) }
     }
 
+    @Test func supportedLibraryEnvelopesRefuseUnrecognizedRootKeys() throws {
+        let current = try LibraryCoder.library.encode(LibraryModel(), revision: 1)
+        let oldCoder = JSONEnvelopeCoder<LibraryCoder.LibraryModelV1>(format: LibraryCoder.schema1Format) { _, _ in [] }
+        let old = try oldCoder.encode(
+            LibraryCoder.LibraryModelV1(schemaVersion: 1, entries: [], collections: [], recentShowIDs: []), revision: 1)
+        for bytes in [current, old] {
+            _ = try LibraryCoder.library.decode(bytes)
+            var object = try json(bytes)
+            object["unrecognizedRoot"] = ["preserve": true]
+            #expect(throws: PersistenceError.unrecognizedContent) { try LibraryCoder.library.decode(data(object)) }
+        }
+        let future: [String: Any] = ["format": DocumentFormat.library.identifier,
+            "schemaVersion": DocumentFormat.library.currentSchemaVersion + 1,
+            "unknownRoot": ["new": "shape"]]
+        #expect(throws: PersistenceError.unknownNewerSchema(
+            found: DocumentFormat.library.currentSchemaVersion + 1, supported: DocumentFormat.library.currentSchemaVersion)) {
+            try LibraryCoder.library.decode(data(future))
+        }
+    }
+
+    @Test func invalidRecordingFactsAreRefusedBeforeEncoding() {
+        for facts in [SourceObservations(durationSeconds: .known(-1)),
+                      SourceObservations(channelCount: .known(0)), SourceObservations(sampleRate: .known(0))] {
+            let source = SourceRecord(displayNameHint: "Generated", observations: facts)
+            let model = ShowDocumentModel(show: Show(title: "Generated"),
+                episodes: [Episode(title: "Episode", sources: [source])])
+            #expect(throws: PersistenceError.self) { try ShowCatalogCoder().encode(ShowCatalog(model), revision: 1) }
+        }
+    }
+
     @Test func refusesInvalidRevisions() throws {
         #expect(throws: PersistenceError.invalidRevision(0)) { try coder.encode(sampleModel(), revision: 0) }
         var object = try json(coder.encode(sampleModel(), revision: 1))

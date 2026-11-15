@@ -19,6 +19,9 @@ Maintained trees are **not** necessarily byte-identical to their historical
 freezes: [test support](../../test-support/README.md) distinguishes `currentTrees`
 maintenance pins from immutable records, seeds and holdout gates.
 Development fixtures/calibration are not unseen qualification.
+Legacy estimation has synchronous interruption checkpoints during proxy
+preparation, window searches and cycle checks. The pipeline translates interruption
+to cancellation and releases admission only after owned work exits.
 
 Every result binds source/format/channel/placement revisions, reference-map
 content, recipe and supersession state. Old payload versions refuse rather
@@ -82,6 +85,12 @@ Metadata menus may use observed counts, but analysis rechecks both participants
 with current authorized probes without silently rewriting saved assignments.
 
 ## Adaptive evidence
+
+Within one measurement, full-window and corroborating calculations reuse the same
+prepared signal pair; broad-band short-window fallback reuses that preparation.
+Upper-band preparation stays separate, and raw samples remain available for
+unchanged silence classification. Preparation is local to the fixed input pair
+and band, never a cross-request cache or source-access grant.
 
 Adaptive fallback applies to inconsistent/discontinuous affine evidence, not
 missing access, weak identity, malformed inputs or arbitrary failure.

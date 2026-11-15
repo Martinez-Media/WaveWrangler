@@ -723,6 +723,9 @@ final class EpisodeSetupModel {
         registrar.onFailure = { [weak self] reason in
             self?.message = "Couldn't relink: \(reason). Nothing was changed."
         }
+        registrar.onUndoFailure = { [weak self] reason in
+            self?.message = "Couldn't undo relink: \(reason). The relink remains applied. Undo is available to retry; the redo history was cleared."
+        }
         registrarStorage = registrar
         return registrar
     }
