@@ -225,6 +225,8 @@ struct AudioTimelineSelectionOverlay: View {
 }
 
 struct AudioTimelineSelectionToolbar: View {
+    private static let scale = 1.2
+
     @Bindable var listening: EpisodeListeningState
     let start: Double
     let duration: Double
@@ -239,12 +241,12 @@ struct AudioTimelineSelectionToolbar: View {
 
     static func height(width: Double, cleanup: EpisodeCleanupModel?, muteSpeaker: SpeakerID? = nil) -> Double {
         cleanup?.selectedManualCut == nil && cleanup?.selectedFiller != nil
-            && width < (muteSpeaker == nil ? 410 : 438) ? 76 : 44
+            && width < (muteSpeaker == nil ? 410 : 438) * scale ? 76 * scale : 44 * scale
     }
 
     static func width(trackWidth: Double, cleanup: EpisodeCleanupModel?, muteSpeaker: SpeakerID? = nil) -> Double {
-        min(trackWidth, cleanup?.selectedManualCut != nil ? 252
-            : (cleanup?.selectedFiller == nil ? 184 : 426) + (muteSpeaker == nil ? 0 : 28))
+        min(trackWidth, (cleanup?.selectedManualCut != nil ? 252
+            : (cleanup?.selectedFiller == nil ? 184 : 426) + (muteSpeaker == nil ? 0 : 28)) * scale)
     }
 
     var body: some View {
@@ -255,7 +257,8 @@ struct AudioTimelineSelectionToolbar: View {
                 if hi > lo || (cleanup?.selectedManualCut != nil && hi >= 0 && lo <= geometry.size.width) {
                     let toolbarWidth = Self.width(trackWidth: min(geometry.size.width, trackWidth),
                                                   cleanup: cleanup, muteSpeaker: muteSpeaker)
-                    let horizontal = cleanup?.selectedFiller == nil || toolbarWidth >= (muteSpeaker == nil ? 410 : 438)
+                    let horizontal = cleanup?.selectedFiller == nil
+                        || toolbarWidth >= (muteSpeaker == nil ? 410 : 438) * Self.scale
                     let layout = horizontal
                         ? AnyLayout(HStackLayout(spacing: 6))
                         : AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
@@ -276,13 +279,14 @@ struct AudioTimelineSelectionToolbar: View {
                     }
                     .buttonStyle(.bordered).controlSize(.mini)
                     .padding(4)
-                    .frame(width: toolbarWidth)
+                    .frame(width: toolbarWidth / Self.scale)
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 5))
+                    .scaleEffect(Self.scale)
+                    .frame(width: toolbarWidth)
                     .position(x: TimelineToolbarPlacement.center(
                         selectionStart: lo, selectionEnd: hi,
                         toolbarWidth: toolbarWidth, trackWidth: geometry.size.width),
                         y: geometry.size.height / 2)
-                    .help("Audition uses current Solo/Mute choices. Context adds up to half a second; episode IN/OUT is unchanged.")
                     .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("ww.timeline.selection.actions")
                     .accessibilitySortPriority(1)
@@ -295,16 +299,20 @@ struct AudioTimelineSelectionToolbar: View {
     private func auditionButtons(_ range: ClosedRange<Double>) -> some View {
         HStack(spacing: 4) {
             Button("Play selection", systemImage: "play.fill") { play(0) }
+                .help("Play the selected interval using current Solo/Mute choices.")
             Button("Play with context", systemImage: "play.rectangle") { play(0.5) }
+                .help("Play the selection with up to half a second before and after, using current Solo/Mute choices. Episode IN/OUT is unchanged.")
             if let cleanup, cleanup.selectedFiller != nil {
                 Button("Loop marker", systemImage: "repeat") {
                     cleanup.loopsFillerAudition.toggle()
                 }
                 .tint(cleanup.loopsFillerAudition ? .accentColor : .secondary)
+                .help(cleanup.loopsFillerAudition ? "Turn off looping for marker auditions." : "Repeat marker auditions until stopped.")
                 .accessibilityValue(cleanup.loopsFillerAudition ? "On" : "Off")
                 .accessibilityIdentifier("ww.cleanup.filler.loop")
                 if cleanup.isPlaying || cleanup.isPreparingPlayback {
                     Button("Stop audition", systemImage: "stop.fill") { cleanup.stopPlayback() }
+                        .help("Stop the current audition.")
                         .accessibilityIdentifier("ww.cleanup.filler.stop")
                 }
             } else {
@@ -312,12 +320,14 @@ struct AudioTimelineSelectionToolbar: View {
                     listening.setCycleRange(range)
                     listening.cycleEnabled = true
                 }
+                .help("Use the selected interval as the playback cycle range and enable Cycle.")
             }
             Button("Clear selection", systemImage: "xmark") {
                 cleanup?.selectedFillerID = nil
                 cleanup?.selectedSpeakerMuteID = nil
                 listening.clearSelection()
             }
+            .help("Clear the selected interval without changing saved edits.")
             if let cleanup, let muteSpeaker {
                 if let region = cleanup.selectedSpeakerMute, region.speaker == muteSpeaker {
                     Button("Remove speaker mute", systemImage: "speaker.wave.2") {

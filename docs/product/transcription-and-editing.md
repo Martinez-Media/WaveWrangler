@@ -76,6 +76,9 @@ keeping their conversation synchronized. Unpinned supplemental clips follow
 their timeline anchors; pinned clips retain their program positions.
 
 Use **Show cut** to reveal removed audio for review without restoring it.
+The inline toolbar provides action-specific hover help. Its Play action auditions
+the edited join while collapsed and the removed audio while expanded;
+**Hear cut with context** includes up to half a second on either side.
 **Restore** or Undo recovers it. Expanded removed audio is review-only: hide the
 cut or choose a production position before placing clips or playing that range
 as a mix.

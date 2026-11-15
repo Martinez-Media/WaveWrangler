@@ -96,29 +96,38 @@ struct ManualCutToolbar: View {
                 model.showManualCut(cut.id, expanded: !expanded)
             }
             .help(
-                "Temporarily expand this cut to adjust its boundaries. Other cuts stay applied; showing or hiding changes no saved edits."
+                expanded
+                    ? "Collapse the removed interval back to its edited join. Saved cuts are unchanged."
+                    : "Temporarily expand this cut to review removed audio and adjust its boundaries. Saved cuts are unchanged."
             )
             .accessibilityIdentifier("ww.timeline.cut.show")
             Button(expanded ? "Hear removed audio" : "Hear edited join", systemImage: "play.fill") {
                 model.auditionManualCut(cut.id, mode: expanded ? .removed : .join)
             }
+            .help(expanded
+                ? "Play the audio removed by this cut using current Solo/Mute choices."
+                : "Play the edited join with up to half a second on either side, using current Solo/Mute choices.")
             .accessibilityIdentifier("ww.timeline.cut.play")
             if expanded {
                 Button("Hear cut with context", systemImage: "play.rectangle") {
                     model.auditionManualCut(cut.id, mode: .original)
                 }
+                .help("Play the removed audio with up to half a second before and after, using current Solo/Mute choices.")
                 .accessibilityIdentifier("ww.timeline.cut.context")
             }
             if model.isPlaying || model.isPreparingPlayback {
                 Button("Stop audition", systemImage: "stop.fill") { model.stopPlayback() }
+                    .help("Stop the current cut audition.")
                     .accessibilityIdentifier("ww.timeline.cut.stop")
             }
             Button("Restore interval markers", systemImage: "arrow.uturn.backward") {
                 model.restoreManualCut(cut.id)
             }
             .disabled(!model.state.canEdit || model.isBusy || model.isRefreshing)
+            .help("Restore this cut's audio across all aligned tracks and select its interval. Other cuts remain applied.")
             .accessibilityIdentifier("ww.timeline.cut.restore")
             Button("Clear cut selection", systemImage: "xmark") { model.clearManualCutSelection() }
+                .help("Deselect this cut and close its tools without restoring the removed audio.")
                 .accessibilityIdentifier("ww.timeline.cut.clear")
         }
         .tint(.red)

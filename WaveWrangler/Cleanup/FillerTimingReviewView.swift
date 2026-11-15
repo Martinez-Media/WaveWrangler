@@ -303,8 +303,10 @@ struct FillerTimingToolbar: View {
                         Button("Reviewed", systemImage: "checkmark.circle") {
                             model.decideFiller(review.id, decision: .reviewed)
                         }
+                        .help("Mark this filler interval as reviewed without cutting audio.")
                         .accessibilityIdentifier("\(accessibilityPrefix).reviewed")
                         Button("Reject", systemImage: "xmark.circle") { model.decideFiller(review.id, decision: .rejected) }
+                            .help("Mark this suggestion as not a filler without changing audio.")
                             .accessibilityIdentifier("\(accessibilityPrefix).reject")
                         Button("Clear review", systemImage: "arrow.uturn.backward.circle") {
                             model.decideFiller(review.id, decision: .pending)
@@ -313,6 +315,7 @@ struct FillerTimingToolbar: View {
                         .accessibilityIdentifier("\(accessibilityPrefix).clearReview")
                         if review.detectedBounds != nil {
                             Button("Revert to detected", systemImage: "arrow.counterclockwise") { model.revertFiller(review.id) }
+                                .help("Restore this filler's detected boundaries without changing audio.")
                                 .accessibilityIdentifier("\(accessibilityPrefix).revert")
                         }
                     }

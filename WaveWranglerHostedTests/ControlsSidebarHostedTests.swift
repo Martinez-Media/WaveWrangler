@@ -164,6 +164,51 @@ struct ControlsSidebarHostedTests {
                                                 toolbarWidth: values.2, trackWidth: values.3) == values.4)
     }
 
+    @Test func cutToolbarScalesNativeControlsAndKeepsExpandedActionsReachable() async throws {
+        let f = try await AlignmentWaveformRetentionHostedTests().fixture(cleanupPrimaries: 1, durationSeconds: 6)
+        defer { f.close() }
+        f.model.placeGroupsAtSourceTime()
+        try await wait { !f.model.isWorking && f.document.verifiedModel == f.document.store.residentModel }
+        let episode = try #require(f.document.store.residentModel.episode(f.model.episodeID))
+        let cut = ManualEpisodeCut(alignmentRevision: try #require(episode.alignment?.acceptedRevision),
+            startFrame: 48_000, endFrame: 96_000)
+        try #require(f.document.store.apply("Seed cut toolbar") { snapshot throws(DomainError) in
+            try snapshot.settingCleanup(EpisodeCleanup(manualCuts: [cut]), in: episode.id)
+        })
+        let model = EpisodeCleanupModel(state: ShowWindowState(store: f.document.store),
+            episodeID: episode.id, runtime: f.runtime)
+        model.connectWorkspace(to: f.model)
+        defer { model.cancel() }
+        model.selectedManualCutID = cut.id
+        let baseline = HostedTimelineWindow(width: 400, height: 100,
+            content: ManualCutToolbar(model: model, cut: cut)
+                .buttonStyle(.bordered).controlSize(.mini).padding(4).frame(width: 252))
+        let scaled = HostedTimelineWindow(width: 400, height: 100,
+            content: AudioTimelineSelectionToolbar(listening: model.listening,
+                start: 0, duration: 6, play: { _ in }, cleanup: model))
+        defer { baseline.close(); scaled.close() }
+        try await baseline.settle()
+        try await scaled.settle()
+        let originalFrames = baseline.controlFrames.sorted { $0.minX < $1.minX }
+        let enlargedFrames = scaled.controlFrames.sorted { $0.minX < $1.minX }
+        try #require(originalFrames.count == 5 && enlargedFrames.count == 5)
+        for (original, enlarged) in zip(originalFrames, enlargedFrames) {
+            #expect(abs(enlarged.width / original.width - 1.2) < 0.01)
+            #expect(abs(enlarged.height / original.height - 1.2) < 0.01)
+        }
+        let saved = f.document.store.residentModel
+        model.listening.expandedManualCutID = cut.id
+        try await scaled.settle()
+        let expandedFrames = scaled.controlFrames.sorted { $0.minX < $1.minX }
+        try #require(expandedFrames.count == 6)
+        try scaled.capture("Enlarged cut toolbar with action-specific help")
+        let clear = try #require(expandedFrames.last)
+        try await scaled.click(CGPoint(x: clear.midX, y: clear.midY))
+        let deselected = model.selectedManualCutID == nil && model.listening.expandedManualCutID == nil
+        let unchanged = f.document.store.residentModel == saved
+        #expect(deselected && unchanged, "The enlarged Clear button must deselect without restoring the cut.")
+    }
+
     @Test func reviewToolsClearReviewAndRevertUseDocumentUndoWithoutEditingSources() async throws {
         let f = try await AlignmentWaveformRetentionHostedTests().fixture(cleanupPrimaries: 1, durationSeconds: 6)
         defer { f.close() }
@@ -219,9 +264,11 @@ struct ControlsSidebarHostedTests {
             \(views)
             """.utf8), named: "compact-marker-native-view-tree.txt")
         func clickControl(_ identifier: String, index: Int, audition: Bool) async throws {
-            let controls = host.controlFrames.filter { $0.height < 15 && $0.width < 30 }
+            let controls = host.controlFrames.filter { $0.height < 18 && $0.width < 36 }
                 .sorted { $0.midY < $1.midY }
             try #require(controls.count == 12, "\(identifier): expected twelve visible native controls, got \(controls)")
+            #expect(controls.allSatisfy { $0.minX >= 0 && $0.maxX <= host.view.bounds.width },
+                "Enlarged toolbar controls must stay inside the visible track.")
             var rows: [[CGRect]] = []
             for frame in controls {
                 if let row = rows.firstIndex(where: { abs($0[0].midY - frame.midY) < 2 }) {

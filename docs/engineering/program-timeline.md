@@ -43,6 +43,12 @@ Its interior cannot be used as a production insertion destination. Keep
 `AudioTimelineProjection` indexes immutable and resolve the live projection
 again at pointer/edit time.
 
+Inline selection/cut toolbars scale controls, spacing, chrome and reserved layout
+by 1.2, including the narrow-track filler layout breakpoint. Placement clamps the
+scaled width to the visible track. Attach hover help to individual actions, not
+the containing toolbar, so cut review, restoration and deselection do not inherit
+selection-audition instructions.
+
 ## Anchors, pins and insertions
 
 Dialogue anchors bind SHA-256 over the **entire canonical `TimeMapVersion`**,
