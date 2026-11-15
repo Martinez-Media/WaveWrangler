@@ -532,7 +532,7 @@ final class LibraryWorkspaceUITests: XCTestCase {
             autosave.click()
         }
 
-        app.toolbars.buttons["Sources"].click()
+        app.toolbars.buttons["Sources & Audio"].click()
         let downloads = app.switches["ww.settings.downloadSources"]
         waitFor(downloads)
         waitForValue(downloads, "1")
@@ -545,7 +545,7 @@ final class LibraryWorkspaceUITests: XCTestCase {
         waitFor(element("ww.library.sidebar"))
         for _ in 0..<5 { app.typeKey("+", modifierFlags: .command) }
         app.typeKey(",", modifierFlags: .command)
-        app.toolbars.buttons["General"].click()
+        app.toolbars.buttons["Workspace"].click()
         let textSize = app.popUpButtons["ww.settings.textSize"]
         waitFor(textSize)
         waitForValue(textSize, "200%")

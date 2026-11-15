@@ -45,6 +45,14 @@ final class AppSettings {
         didSet { if preferences.textSize != textSize { preferences.textSize = textSize } }
     }
 
+    var workspacesInSeparateWindows: Bool {
+        didSet {
+            if preferences.workspacesInSeparateWindows != workspacesInSeparateWindows {
+                preferences.workspacesInSeparateWindows = workspacesInSeparateWindows
+            }
+        }
+    }
+
     var editingPlaybackPolicy: EditingPlaybackPolicy {
         didSet {
             if preferences.editingPlaybackPolicy != editingPlaybackPolicy {
@@ -83,6 +91,7 @@ final class AppSettings {
         autosaveEnabled = preferences.autosaveEnabled
         downloadSourcesAutomatically = preferences.downloadSourcesAutomatically
         textSize = preferences.textSize
+        workspacesInSeparateWindows = preferences.workspacesInSeparateWindows
         editingPlaybackPolicy = preferences.editingPlaybackPolicy
         timelineJumpInterval = preferences.timelineJumpInterval
         cutJumpBackSeconds = preferences.cutJumpBackSeconds
@@ -102,6 +111,9 @@ final class AppSettings {
             downloadSourcesAutomatically = preferences.downloadSourcesAutomatically
         }
         if textSize != preferences.textSize { textSize = preferences.textSize }
+        if workspacesInSeparateWindows != preferences.workspacesInSeparateWindows {
+            workspacesInSeparateWindows = preferences.workspacesInSeparateWindows
+        }
         if editingPlaybackPolicy != preferences.editingPlaybackPolicy {
             editingPlaybackPolicy = preferences.editingPlaybackPolicy
         }

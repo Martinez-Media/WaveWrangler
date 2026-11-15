@@ -15,8 +15,7 @@ final class EpisodeReviewPresentation {
         guard let state, state.selectedEpisode != nil, state.cleanupModel != nil, !isClosed else { return }
         if let existing = detachedWindow {
             existing.showWindow(nil)
-            existing.window?.deminiaturize(nil)
-            existing.window?.makeKeyAndOrderFront(nil)
+            existing.window?.showWorkspaceWindow()
             return
         }
         let hosting = NSHostingController(rootView: DetachedReview(presentation: self).wwAppEnvironment())
@@ -26,6 +25,7 @@ final class EpisodeReviewPresentation {
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
         window.contentMinSize = NSSize(width: 720, height: 300)
         window.setContentSize(NSSize(width: 1000, height: 500))
+        window.restoreWorkspaceFrame(named: "WaveWrangler.workbench.Review")
         window.tabbingMode = .disallowed
         window.isRestorable = false
         window.setAccessibilityIdentifier("ww.review.window")
@@ -35,7 +35,8 @@ final class EpisodeReviewPresentation {
         ShowWindowRegistry.register(state, for: window)
         modelDidChange()
         owner.showWindow(nil)
-        window.makeKeyAndOrderFront(nil)
+        if state.bottomPaneContent == .review { state.bottomPanePresented = false }
+        window.showWorkspaceWindow()
     }
 
     func reattach() {

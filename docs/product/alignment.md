@@ -7,6 +7,12 @@ rewrite the original media, and analysis never accepts its own proposal.
 
 ## Before analyzing
 
+**Alignment** and **Recordings & Speakers** are nonmodal working views in the
+resizable bottom panel. Use the workspace buttons or bottom tabs to switch tools,
+or Option-click a workspace button to open a separate window. **Reattach**
+returns the tool to the editor. The right inspector contains **Selection**
+details or **Episode** metadata; opening a working view does not open the inspector.
+
 In **Recordings & Speakers**, check recorder groups, recording segments, speaker
 assignments, Primary choices, and channels. Resolve unavailable or changed
 sources first. Automatic matching needs shared audio from the same speaker,

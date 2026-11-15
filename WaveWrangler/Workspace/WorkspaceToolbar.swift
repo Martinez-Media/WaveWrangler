@@ -7,44 +7,23 @@ struct WorkspaceBottomPaneToggles: View {
 
     var body: some View {
         HStack(spacing: 2) {
+            ForEach(EpisodeBottomPaneContent.allCases, id: \.self) { content in
             Button {
-                if NSEvent.modifierFlags.contains(.option) || state.reviewPresentation.isDetached {
-                    state.reviewPresentation.detach()
-                } else {
-                    state.reviewPanelPresented.toggle()
-                }
+                state.toggleWorkspace(content, separateWindow: NSEvent.modifierFlags.contains(.option))
             } label: {
-                Image(systemName: "rectangle.bottomthird.inset.filled")
+                Image(systemName: content.symbol)
                     .frame(width: 24, height: 24)
-                    .background(state.reviewPanelPresented || state.reviewPresentation.isDetached
+                    .background((state.bottomPanePresented && state.bottomPaneContent == content) || state.workspaceIsDetached(content)
                                 ? Color.accentColor.opacity(0.2) : .clear,
                                 in: RoundedRectangle(cornerRadius: 5))
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Review panel")
-            .accessibilityValue(state.reviewPresentation.isDetached
-                ? "In separate window" : state.reviewPanelPresented ? "Shown" : "Hidden")
-            .accessibilityIdentifier("ww.review.toggle")
-            .help(state.reviewPresentation.isDetached
-                ? "Show the detached Transcript & Review window"
-                : "\(state.reviewPanelPresented ? "Hide" : "Show") the resizable bottom review list. Option-click to open in a separate window.")
-            Button {
-                if NSEvent.modifierFlags.contains(.option) {
-                    state.mixerPresentation.detach()
-                } else if state.bottomPanePresented, state.bottomPaneContent == .mixer, !state.mixerPresentation.isDetached {
-                    state.bottomPanePresented = false
-                } else {
-                    state.mixerPresentation.showDocked()
-                }
-            } label: {
-                Image(systemName: "slider.vertical.3").frame(width: 24, height: 24)
+            .accessibilityLabel(content.rawValue)
+            .accessibilityValue(state.workspaceIsDetached(content) ? "In separate window"
+                : state.bottomPanePresented && state.bottomPaneContent == content ? "Shown" : "Hidden")
+            .accessibilityIdentifier(content == .recordings ? "ww.show.recordings" : "ww.\(content.rawValue.lowercased()).toggle")
+            .help("Show or focus \(content.rawValue). Option-click to open a separate window.")
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Mixer")
-            .accessibilityValue(state.mixerPresentation.isDetached ? "In separate window"
-                : state.bottomPanePresented && state.bottomPaneContent == .mixer ? "Shown" : "Hidden")
-            .accessibilityIdentifier("ww.mixer.toggle")
-            .help("Show the production mixer in the bottom pane or focus its separate window. Option-click to open in a separate window.")
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Bottom panes")
@@ -53,10 +32,11 @@ struct WorkspaceBottomPaneToggles: View {
 
 struct WorkspaceInspectorToggles: View {
     @Bindable var state: ShowWindowState
+    private let activities: [ShowWindowState.WorkspaceInspector] = [.recording, .episode]
 
     var body: some View {
         HStack(spacing: 2) {
-            ForEach(ShowWindowState.WorkspaceInspector.allCases, id: \.self) { activity in
+            ForEach(activities, id: \.self) { activity in
                 let active = state.inspectorPresented && state.workspaceInspector == activity
                 Button {
                     state.toggleWorkspaceInspector(activity)
@@ -67,11 +47,11 @@ struct WorkspaceInspectorToggles: View {
                                     in: RoundedRectangle(cornerRadius: 5))
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("\(activity.rawValue) sidebar")
+                .accessibilityLabel("\(activity.title) inspector")
                 .accessibilityValue(active ? "Shown" : "Hidden")
                 .accessibilityAddTraits(active ? [.isSelected] : [])
                 .accessibilityIdentifier("ww.sidebar.\(activity.identifier)")
-                .help("\(active ? "Hide" : "Show") \(activity.rawValue) sidebar")
+                .help("\(active ? "Hide" : "Show") \(activity.title) inspector")
             }
         }
         .accessibilityElement(children: .contain)

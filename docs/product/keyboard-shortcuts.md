@@ -49,7 +49,7 @@ handle, or other control owning the key:
 | Audition Selection | Command-Return |
 | Stop Audition | Escape |
 
-Set the jump interval in **Settings > General > Timeline keyboard controls**:
+Set the jump interval in **Settings > Editing & Playback > Timeline keyboard controls**:
 1, 2, 5, 10, 15, or 30 seconds; the default is 5. Held Space does not repeatedly
 toggle playback. Focused controls retain their own keyboard behavior.
 

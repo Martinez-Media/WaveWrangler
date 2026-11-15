@@ -5,6 +5,17 @@ import WWCore
 enum EpisodeBottomPaneContent: String, Codable, CaseIterable {
     case review = "Review"
     case mixer = "Mixer"
+    case recordings = "Recordings & Speakers"
+    case alignment = "Alignment"
+
+    var symbol: String {
+        switch self {
+        case .review: "text.bubble"
+        case .mixer: "slider.vertical.3"
+        case .recordings: "person.2"
+        case .alignment: "waveform.path"
+        }
+    }
 }
 
 struct EpisodeWorkspaceViewState: Codable, Equatable {

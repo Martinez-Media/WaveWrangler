@@ -89,8 +89,6 @@ extension EpisodeCleanupModel {
             return
         }
         listening.selectedTranscriptText = nil
-        state.workspaceInspector = .transcript
-        state.inspectorPresented = true
         if let issue = fillerIssue(review) {
             selectFiller(id, reveal: false, movePlayhead: false)
             listening.selection = nil

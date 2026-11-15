@@ -136,7 +136,7 @@ struct ReviewPanelHostedTests {
         #expect(abs(f.model.waveformDurationSeconds - 1.953125) < 0.000001,
                 "Repeated focus uses the automatic context, not the current viewport's zoom.")
         #expect(cleanup.listening.selection == 1...1.3)
-        #expect(cleanup.state.workspaceInspector == .transcript && cleanup.state.inspectorPresented)
+        #expect(cleanup.state.workspaceInspector == .recording && cleanup.state.inspectorPresented)
         #expect(f.document.store.residentModel == before)
         cleanup.windowStart = 3
         #expect(cleanup.reviewRows == rows)

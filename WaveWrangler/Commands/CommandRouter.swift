@@ -251,7 +251,7 @@ final class CommandRouter: NSObject, NSMenuItemValidation {
     }
 
     @objc func toggleInspector(_ sender: Any?) { activeShowState?.toggleInspector() }
-    @objc func showMixer(_ sender: Any?) { activeShowState?.mixerPresentation.showDocked() }
+    @objc func showMixer(_ sender: Any?) { activeShowState?.openWorkspace(.mixer) }
     @objc func detachMixer(_ sender: Any?) { activeShowState?.mixerPresentation.detach() }
     @objc func showSaveStatus(_ sender: Any?) { activeDocumentState?.showSaveStatus() }
 

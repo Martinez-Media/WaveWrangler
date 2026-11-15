@@ -10,13 +10,85 @@ final class ControlsSidebarUITests: XCTestCase {
         exerciseSidebars(minimumSize: true)
     }
 
+    func testAlignmentAndRecordingsDetachAndReattachFromToolbar() {
+        let app = launch()
+        defer { app.terminate() }
+        let main = app.windows["ww.show.window"]
+        XCTAssertTrue(main.waitForExistence(timeout: 20))
+        for (buttonID, kind, tableID) in [
+            ("ww.alignment.toggle", "alignment", "ww.alignment.groups"),
+            ("ww.show.recordings", "recordings", "ww.setup.sources"),
+        ] {
+            let button = main.buttons[buttonID]
+            XCTAssertTrue(button.isHittable)
+            XCUIElement.perform(withKeyModifiers: .option) { button.click() }
+            let window = app.windows["ww.workbench.\(kind).window"]
+            XCTAssertTrue(window.waitForExistence(timeout: 10))
+            XCTAssertTrue(window.outlines[tableID].waitForExistence(timeout: 10))
+            XCTAssertEqual(app.windows.matching(identifier: "ww.show.window").count, 1)
+            let reattach = window.buttons["Reattach"]
+            XCTAssertTrue(reattach.isHittable)
+            let attachment = XCTAttachment(screenshot: window.screenshot())
+            attachment.name = "Detached \(kind) workspace"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            button.click()
+            XCTAssertEqual(app.windows.matching(identifier: "ww.workbench.\(kind).window").count, 1)
+            reattach.click()
+            XCTAssertTrue(window.waitForNonExistence(timeout: 5))
+            XCTAssertTrue(main.outlines[tableID].waitForExistence(timeout: 5))
+            main.buttons["ww.bottomPane.hide"].click()
+        }
+    }
+
+    func testGlobalCutRailOwnsOneCutAndItsEditableBoundaries() {
+        let app = launch()
+        defer { app.terminate() }
+        let candidate = app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH 'ww.cleanup.filler.' AND label CONTAINS 'Um,'")).firstMatch
+        XCTAssertTrue(candidate.waitForExistence(timeout: 20))
+        reveal(candidate, in: app)
+        candidate.click()
+        let apply = app.buttons["ww.timeline.selection.cut"]
+        XCTAssertTrue(apply.waitForExistence(timeout: 5) && apply.isHittable)
+        apply.click()
+        let cuts = app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH 'ww.timeline.cut.' AND label == 'Cross-track cut'"))
+        XCTAssertTrue(cuts.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertEqual(cuts.count, 1, "One global edit must not appear as independently editable lane cuts.")
+        let cutID = cuts.firstMatch.identifier
+        let tracks = app.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier BEGINSWITH 'alignment.waveforms.track.'"))
+        for track in tracks.allElementsBoundByIndex {
+            XCTAssertFalse(track.buttons[cutID].exists)
+        }
+        cuts.firstMatch.click()
+        let actions = app.descendants(matching: .any).matching(identifier: "ww.timeline.selection.actions").firstMatch
+        XCTAssertTrue(actions.waitForExistence(timeout: 5))
+        let show = actions.buttons["ww.timeline.cut.show"].firstMatch
+        XCTAssertTrue(show.waitForExistence(timeout: 5) && wait { show.isHittable },
+                      String(actions.debugDescription.prefix(3000)))
+        show.click()
+        let start = app.buttons[cutID + ".start"]
+        let end = app.buttons[cutID + ".end"]
+        XCTAssertTrue(start.waitForExistence(timeout: 5) && end.isHittable)
+        XCTAssertFalse(cuts.firstMatch.exists)
+        let attachment = XCTAttachment(screenshot: app.windows["ww.show.window"].screenshot())
+        attachment.name = "Shared global cut rail and cross-track guides"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        actions.buttons["ww.timeline.cut.restore"].firstMatch.click()
+        XCTAssertTrue(candidate.waitForExistence(timeout: 5))
+        XCTAssertFalse(start.exists || end.exists || cuts.firstMatch.exists)
+    }
+
     func testDetachedReviewSharesFiltersCutUndoAndReattachesWithoutAnotherEpisode() {
         let app = launch()
         defer { app.terminate() }
         let main = app.windows["ww.show.window"]
         XCTAssertTrue(main.waitForExistence(timeout: 20))
-        let review = app.buttons["ww.review.toggle"]
-        if review.value as? String != "Shown" { review.click() }
+        let reviewToggle = app.buttons["ww.review.toggle"]
+        if reviewToggle.value as? String != "Shown" { reviewToggle.click() }
         let detach = app.buttons["ww.review.detach"]
         XCTAssertTrue(detach.waitForExistence(timeout: 10))
         detach.click()
@@ -395,11 +467,11 @@ final class ControlsSidebarUITests: XCTestCase {
         let app = launch(minimumSize: minimumSize)
         defer { app.terminate() }
         let recording = app.buttons["ww.sidebar.recording"]
-        let alignment = app.buttons["ww.sidebar.alignment"]
-        let transcript = app.buttons["ww.sidebar.transcript"]
+        let alignment = app.buttons["ww.alignment.toggle"]
+        let reviewToggle = app.buttons["ww.review.toggle"]
         let episode = app.buttons["ww.sidebar.episode"]
         XCTAssertTrue(recording.waitForExistence(timeout: 20), app.debugDescription)
-        for toggle in [recording, alignment, transcript, episode] {
+        for toggle in [recording, alignment, reviewToggle, episode] {
             XCTAssertTrue(toggle.isHittable, toggle.debugDescription)
         }
         let recordings = app.buttons["ww.show.recordings"]
@@ -410,12 +482,12 @@ final class ControlsSidebarUITests: XCTestCase {
         recordings.click()
         XCTAssertTrue(app.outlines["ww.setup.sources"].waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(app.outlines["ww.setup.speakers"].exists)
-        app.buttons["Done"].click()
+        app.buttons["ww.bottomPane.hide"].click()
         XCTAssertTrue(wait { recording.isHittable })
         XCTAssertFalse(app.outlines["ww.alignment.groups"].exists, "The recording inspector is contextual, not the detailed table.")
         alignment.click()
         XCTAssertEqual(alignment.value as? String, "Shown")
-        XCTAssertEqual(recording.value as? String, "Hidden")
+        XCTAssertEqual(recording.value as? String, "Shown", "Opening Alignment must not change the inspector.")
         XCTAssertTrue(app.outlines["ww.alignment.groups"].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(app.scrollViews["ww.inspector.alignment.details"].exists)
         alignment.click()
@@ -423,19 +495,20 @@ final class ControlsSidebarUITests: XCTestCase {
         XCTAssertTrue(wait { !app.outlines["ww.alignment.groups"].exists })
         episode.click()
         XCTAssertTrue(app.textFields["ww.inspector.episode.title"].waitForExistence(timeout: 5))
-        transcript.click()
-        let reading = app.descendants(matching: .any)["ww.review.transcriptReading"]
-        XCTAssertTrue(reading.waitForExistence(timeout: 5))
-        reveal(reading, in: app, scrollID: "ww.inspector")
-        reading.click()
-        XCTAssertTrue(app.descendants(matching: .any).matching(
-            NSPredicate(format: "identifier BEGINSWITH 'ww.transcript.full.'")).firstMatch.waitForExistence(timeout: 5),
-            app.debugDescription)
-        XCTAssertEqual(episode.value as? String, "Hidden")
+        reviewToggle.click()
+        XCTAssertTrue(app.descendants(matching: .any)["ww.review.panel"].waitForExistence(timeout: 5))
+        XCTAssertEqual(episode.value as? String, "Shown", "Review and Episode details are independent surfaces.")
+        reviewToggle.click()
+        let attachment = XCTAttachment(screenshot: app.windows["ww.show.window"].screenshot())
+        attachment.name = minimumSize ? "Compact episode workspace" : "Episode workspace"
+        attachment.lifetime = .keepAlways
+        add(attachment)
         let primary = app.menuButtons["alignment.waveforms.tool"]
         reveal(primary, in: app)
         XCTAssertTrue(primary.isHittable)
-        XCTAssertTrue(app.menuButtons["alignment.waveforms.commandTool"].isHittable)
+        let secondary = app.menuButtons["alignment.waveforms.commandTool"]
+        reveal(secondary, in: app)
+        XCTAssertTrue(secondary.isHittable)
         openTimelineMore(in: app)
         app.menuButtons["Listening Presets"].click()
         let preset = app.menuItems["ww.listening.preset.soloPrimaries"]
@@ -454,14 +527,18 @@ final class ControlsSidebarUITests: XCTestCase {
                 XCTAssertTrue(window.frame.contains(control.frame),
                               "Bottom pane layout must not move controls outside the episode window.")
             }
-            openTimelineMore(in: app)
-            XCTAssertTrue(app.sliders["alignment.waveforms.zoom"].isHittable)
+            let zoom = app.sliders["alignment.waveforms.zoom"]
+            reveal(zoom, in: app)
+            XCTAssertTrue(zoom.isHittable)
+            reveal(primary, in: app)
             XCTAssertTrue(primary.isHittable)
             closeTimelineMore(in: app)
         }
+        let review = app.buttons["ww.review.toggle"]
+        review.click()
+        XCTAssertTrue(wait { review.value as? String == "Shown" })
         assertDockedControls()
         let dockedY = play.frame.minY
-        let review = app.buttons["ww.review.toggle"]
         review.click()
         XCTAssertTrue(wait { review.value as? String == "Hidden" })
         assertDockedControls()

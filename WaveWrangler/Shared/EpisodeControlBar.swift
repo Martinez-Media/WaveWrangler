@@ -157,7 +157,7 @@ struct EpisodeControlBar: View {
             VStack(alignment: .leading, spacing: 12) {
                 if width < 1000 { AudioWorkspaceActions(state: state, alignment: model, surface: .add) }
                 Text("Episode").font(.headline)
-                EpisodeBoundaryControls(model: model, cleanup: cleanup)
+                if !displayedControls.contains(.boundaries) { EpisodeBoundaryControls(model: model, cleanup: cleanup) }
                 AudioWorkspaceWorkflowActions(state: state, alignment: model)
                 AudioWorkspaceActions(state: state, alignment: model, surface: .listening)
                 Button("Transcription Settings…", systemImage: "gearshape") {
@@ -182,14 +182,18 @@ struct EpisodeControlBar: View {
                                                                set: { model.setFollowPlayhead($0) }))
                     }
                 }
-                TimelineToolControls(listening: model.listening)
-                anchorMenu
+                if !displayedControls.contains(.primaryTool) || !displayedControls.contains(.commandTool) {
+                    TimelineToolControls(listening: model.listening,
+                        showsPrimary: !displayedControls.contains(.primaryTool),
+                        showsCommand: !displayedControls.contains(.commandTool))
+                }
+                if !displayedControls.contains(.anchors) { anchorMenu }
                 Divider()
                 Text("View").font(.headline)
-                layoutPicker
-                normalization
-                overflowNavigation.zoomGroup
-                overflowNavigation.heightGroup
+                if !displayedControls.contains(.layout) { layoutPicker }
+                if !displayedControls.contains(.normalize) { normalization }
+                if !displayedControls.contains(.zoom) { overflowNavigation.zoomGroup }
+                if layout != .overlay && !displayedControls.contains(.height) { overflowNavigation.heightGroup }
                 AudioTimelineRefresh(
                     prefix: "alignment.waveforms",
                     isLoading: hasRecordings && (model.isLoadingWaveforms || model.isLoadingOverview),

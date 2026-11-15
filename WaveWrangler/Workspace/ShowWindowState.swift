@@ -38,7 +38,13 @@ final class ShowWindowState {
         }
     }
     var inspectorPresented = true { didSet { persistWorkspacePanels() } }
-    var recordingsPresented = false { didSet { persistWorkspacePanels() } }
+    var recordingsPresented: Bool {
+        get { (bottomPanePresented && bottomPaneContent == .recordings) || workspaceIsDetached(.recordings) }
+        set {
+            if newValue { openWorkspace(.recordings) }
+            else if bottomPaneContent == .recordings { bottomPanePresented = false }
+        }
+    }
     var exportPresented = false
     enum WorkspaceInspector: String, CaseIterable {
         case recording = "Recording"
@@ -63,6 +69,8 @@ final class ShowWindowState {
             case .episode: "episode"
             }
         }
+
+        var title: String { self == .recording ? "Selection" : rawValue }
     }
     var workspaceInspector = WorkspaceInspector.recording { didSet { persistWorkspacePanels() } }
 
@@ -90,6 +98,58 @@ final class ShowWindowState {
 
     @ObservationIgnored lazy var mixerPresentation = EpisodeMixerPresentation(state: self)
     @ObservationIgnored lazy var reviewPresentation = EpisodeReviewPresentation(state: self)
+    @ObservationIgnored lazy var workbenchPresentation = EpisodeWorkbenchPresentation(state: self)
+    var setupController: EpisodeSetupViewController?
+
+    func workspaceIsDetached(_ content: EpisodeBottomPaneContent) -> Bool {
+        switch content {
+        case .review: reviewPresentation.isDetached
+        case .mixer: mixerPresentation.isDetached
+        case .recordings, .alignment: workbenchPresentation.isDetached(content)
+        }
+    }
+
+    func openWorkspace(_ content: EpisodeBottomPaneContent, separateWindow: Bool? = nil) {
+        guard selectedEpisodeID != nil else { return }
+        let detached = separateWindow ?? AppSettings.shared.workspacesInSeparateWindows
+        select(.alignment)
+        if detached && (content == .review || content == .mixer) && cleanupModel == nil {
+            pendingSeparateWorkspace = content
+            return
+        }
+        if detached || workspaceIsDetached(content) {
+            detachWorkspace(content)
+        } else {
+            bottomPaneContent = content
+            bottomPanePresented = true
+        }
+    }
+
+    func toggleWorkspace(_ content: EpisodeBottomPaneContent, separateWindow: Bool = false) {
+        if separateWindow || AppSettings.shared.workspacesInSeparateWindows || workspaceIsDetached(content) {
+            openWorkspace(content, separateWindow: true)
+        } else if bottomPanePresented && bottomPaneContent == content {
+            bottomPanePresented = false
+        } else {
+            openWorkspace(content, separateWindow: false)
+        }
+    }
+
+    func detachWorkspace(_ content: EpisodeBottomPaneContent) {
+        switch content {
+        case .review: reviewPresentation.detach()
+        case .mixer: mixerPresentation.detach()
+        case .recordings, .alignment: workbenchPresentation.detach(content)
+        }
+    }
+
+    func reattachWorkspace(_ content: EpisodeBottomPaneContent) {
+        switch content {
+        case .review: reviewPresentation.reattach()
+        case .mixer: mixerPresentation.reattach()
+        case .recordings, .alignment: workbenchPresentation.reattach(content)
+        }
+    }
 
     func toggleWorkspaceInspector(_ activity: WorkspaceInspector) {
         if inspectorPresented, workspaceInspector == activity {
@@ -97,7 +157,6 @@ final class ShowWindowState {
         } else {
             workspaceInspector = activity
             inspectorPresented = true
-            if activity == .transcript { reviewPanelPresented = true }
         }
     }
 
@@ -119,7 +178,15 @@ final class ShowWindowState {
     @ObservationIgnored var explicitSavePending = false
     /// The Alignment workspace currently displayed in this window, for inspector and menu routing.
     var alignmentModel: EpisodeAlignmentModel?
-    var cleanupModel: EpisodeCleanupModel?
+    @ObservationIgnored private var pendingSeparateWorkspace: EpisodeBottomPaneContent?
+    var cleanupModel: EpisodeCleanupModel? {
+        didSet {
+            if cleanupModel != nil, let pending = pendingSeparateWorkspace {
+                pendingSeparateWorkspace = nil
+                openWorkspace(pending, separateWindow: true)
+            }
+        }
+    }
     private var listeningStates: [EpisodeID: EpisodeListeningState] = [:]
 
     func alignmentWorkspaceDidDisappear() {
@@ -182,7 +249,10 @@ final class ShowWindowState {
             } ?? .alignment
             workspaceInspector = WorkspaceInspector(rawValue: view.inspector) ?? .recording
             inspectorPresented = view.inspectorPresented
-            recordingsPresented = view.recordingsPresented
+            if view.recordingsPresented {
+                bottomPaneContent = .recordings
+                bottomPanePresented = true
+            }
         }
         #if DEBUG
         if UserDefaults.standard.bool(forKey: "WWUITestHooks"),
@@ -447,6 +517,7 @@ final class ShowWindowState {
         invalidateBoundReview()
         cleanupModel?.modelDidChange()
         reviewPresentation.modelDidChange()
+        workbenchPresentation.modelDidChange()
     }
 
     func reviewSpeakerSelectionDidChange() { invalidateBoundReview() }
@@ -459,6 +530,9 @@ final class ShowWindowState {
         invalidateBoundReview()
         mixerPresentation.originDidClose()
         reviewPresentation.originDidClose()
+        workbenchPresentation.originDidClose()
+        setupController?.model.stopObserving()
+        setupController = nil
         alignmentModel?.suspend()
         alignmentModel = nil
         if let pinnedEpisode { store.unpinEpisode(pinnedEpisode, owner: residencyOwner) }

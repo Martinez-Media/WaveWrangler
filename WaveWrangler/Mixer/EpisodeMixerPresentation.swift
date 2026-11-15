@@ -82,8 +82,7 @@ final class EpisodeMixerPresentation {
     func showDocked() {
         guard let state, !isClosed else { return }
         if let window = detachedWindow?.window {
-            window.deminiaturize(nil)
-            window.makeKeyAndOrderFront(nil)
+            window.showWorkspaceWindow()
             return
         }
         state.select(.alignment)
@@ -96,8 +95,7 @@ final class EpisodeMixerPresentation {
         if state.bottomPaneContent == .mixer { state.bottomPanePresented = false }
         if let existing = detachedWindow {
             existing.showWindow(nil)
-            existing.window?.deminiaturize(nil)
-            existing.window?.makeKeyAndOrderFront(nil)
+            existing.window?.showWorkspaceWindow()
             return
         }
         let hosting = NSHostingController(rootView: MixerView(presentation: self, detached: true).wwAppEnvironment())
@@ -107,6 +105,7 @@ final class EpisodeMixerPresentation {
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
         window.contentMinSize = NSSize(width: 520, height: 360)
         window.setContentSize(NSSize(width: 900, height: 650))
+        window.restoreWorkspaceFrame(named: "WaveWrangler.workbench.Mixer")
         window.tabbingMode = .disallowed
         window.setAccessibilityIdentifier("ww.mixer.window")
         let owner = MixerDetachedWindowController(window: window)
@@ -115,7 +114,7 @@ final class EpisodeMixerPresentation {
         ShowWindowRegistry.register(state, for: window)
         updateTitle()
         owner.showWindow(nil)
-        window.makeKeyAndOrderFront(nil)
+        window.showWorkspaceWindow()
     }
 
     func reattach() {
@@ -416,6 +415,29 @@ final class EpisodeMixerPresentation {
 final class EpisodeAuxiliaryWindow: NSWindow {
     weak var originatingState: ShowWindowState?
     override var undoManager: UndoManager? { originatingState?.store.document?.undoManager }
+}
+
+extension NSWindow {
+    func restoreWorkspaceFrame(named name: String) {
+        setFrameAutosaveName(name)
+        _ = setFrameUsingName(name)
+        recoverWorkspacePosition()
+    }
+
+    func showWorkspaceWindow() {
+        recoverWorkspacePosition()
+        deminiaturize(nil)
+        makeKeyAndOrderFront(nil)
+    }
+
+    private func recoverWorkspacePosition() {
+        let titleBar = NSRect(x: frame.minX, y: frame.maxY - 28, width: frame.width, height: 28)
+        let reachable = NSScreen.screens.contains {
+            let intersection = $0.visibleFrame.intersection(titleBar)
+            return intersection.width >= 100 && intersection.height >= 20
+        }
+        if !reachable { center() }
+    }
 }
 
 @MainActor

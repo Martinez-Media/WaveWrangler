@@ -3,7 +3,7 @@ import SwiftUI
 import WWCore
 import WWOrganizer
 
-/// Settings window: non-customizable toolbar with General, Sources and Transcription panes, title
+/// Settings window: non-customizable toolbar with task-oriented panes, title
 /// matching the pane, minimize/zoom dimmed, reopens on the last pane. Changes apply immediately.
 @MainActor
 final class SettingsWindowController: NSWindowController, NSWindowDelegate {
@@ -44,6 +44,8 @@ private final class SettingsTabViewController: NSTabViewController {
         for pane in SettingsPane.allCases {
             let root: AnyView = switch pane {
             case .general: AnyView(GeneralSettingsView().wwAppEnvironment())
+            case .workspace: AnyView(WorkspaceSettingsView().wwAppEnvironment())
+            case .editing: AnyView(EditingSettingsView().wwAppEnvironment())
             case .sources: AnyView(SourcesSettingsView().wwAppEnvironment())
             case .transcription: AnyView(TranscriptionSettingsView().wwAppEnvironment())
             }
@@ -82,7 +84,7 @@ struct GeneralSettingsView: View {
     var body: some View {
         @Bindable var settings = settings
         Form {
-            Section {
+            Section("Saving") {
                 let connected = AutosavePolicyConnection.isConnected
                 let effective = AutosavePolicyConnection.effectiveAutosaveEnabled
                 Toggle(SettingsWording.autosaveTitle, isOn: Binding(
@@ -98,7 +100,23 @@ struct GeneralSettingsView: View {
                     caption(AutosavePolicyConnection.notConnectedNote)
                 }
             }
-            Section {
+            Section("Library") {
+                LibraryLocationControl()
+            }
+        }
+        .formStyle(.grouped)
+        .frame(width: 620)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+struct WorkspaceSettingsView: View {
+    @Environment(AppSettings.self) private var settings
+
+    var body: some View {
+        @Bindable var settings = settings
+        Form {
+            Section("Appearance") {
                 Picker(SettingsWording.textSizeTitle, selection: $settings.textSize) {
                     ForEach(TextSize.all, id: \.self) { size in
                         Text(size.description).tag(size)
@@ -110,10 +128,31 @@ struct GeneralSettingsView: View {
                 .accessibilityIdentifier("ww.settings.textSize")
                 caption(SettingsWording.textSizeCaption)
             }
-            Section {
-                LibraryLocationControl()
+            Section("Working windows") {
+                Toggle("Open workspaces in separate windows", isOn: $settings.workspacesInSeparateWindows)
+                    .toggleStyle(.switch)
+                    .accessibilityIdentifier("ww.settings.workspace.separateWindows")
+                caption("Applies to Review, Mixer, Alignment, and Recordings & Speakers when you open them. Existing windows are focused, not duplicated. Open panels stay where they are when this preference changes.")
+                caption("Option-click a workspace button to open a separate window. Use Reattach to return it to the bottom panel.")
             }
-            Section {
+            Section("Control bar") {
+                Button("Customize Control Bar and Display…") { ControlBarCustomizationController.show() }
+                    .accessibilityIdentifier("ww.settings.workspace.customize")
+            }
+        }
+        .formStyle(.grouped)
+        .frame(width: 620)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+struct EditingSettingsView: View {
+    @Environment(AppSettings.self) private var settings
+
+    var body: some View {
+        @Bindable var settings = settings
+        Form {
+            Section("Listening") {
                 Picker("After alignment", selection: $settings.editingPlaybackPolicy) {
                     ForEach(EditingPlaybackPolicy.allCases, id: \.self) { policy in
                         Text(policy.title).tag(policy)
@@ -132,14 +171,14 @@ struct GeneralSettingsView: View {
                 caption("Space plays or pauses when another control is not focused. Left/Right jump by this interval in the track area. Text fields, review lists and 1 ms boundary-handle adjustments keep their normal keys.")
             }
             Section("Cut editing") {
-                MixerNumberControl(title: "Jump back before a new cut (seconds)", value: $settings.cutJumpBackSeconds,
+                SettingsNumberControl(title: "Jump back before a new cut", unit: "seconds", value: $settings.cutJumpBackSeconds,
                     range: AppPreferences.cutJumpBackRange, identifier: "ww.settings.cutJumpBack",
-                    endEditing: {})
+                    precision: 2)
                 caption("After applying a cut, place the playhead this many seconds before its join. Default: 0.5 seconds. The playhead never moves before the timeline start. This does not change cut boundaries or audition lengths.")
             }
         }
         .formStyle(.grouped)
-        .frame(width: 520)
+        .frame(width: 620)
         .fixedSize(horizontal: false, vertical: true)
     }
 }
@@ -150,7 +189,7 @@ struct SourcesSettingsView: View {
     var body: some View {
         @Bindable var settings = settings
         Form {
-            Section {
+            Section("Source availability") {
                 Toggle(SettingsWording.downloadTitle, isOn: $settings.downloadSourcesAutomatically)
                     .toggleStyle(.switch)
                     .help(SettingsWording.downloadCaption(enabled: settings.downloadSourcesAutomatically))
@@ -158,16 +197,43 @@ struct SourcesSettingsView: View {
                 caption(SettingsWording.downloadCaption(enabled: settings.downloadSourcesAutomatically))
             }
             Section("Auto Input Gain") {
-                MixerNumberControl(title: "Target level (dBFS RMS)", value: $settings.autoInputGainTargetDBFS,
+                SettingsNumberControl(title: "Target level", unit: "dBFS RMS", value: $settings.autoInputGainTargetDBFS,
                     range: AutoInputGainTarget.rangeDBFS, identifier: "ww.settings.autoInputGain.target",
-                    endEditing: {})
+                    precision: 1)
                 caption("Editing reference for audio above a quiet gate, not final loudness or voice detection. Noise and music can influence the result. Default: -20 dBFS RMS. Estimated true peaks are kept below -6 dBTP with an additional 0.5 dB margin.")
                 caption("Run Auto Input Gain explicitly for one speaker's confirmed Primary from its input-gain controls or mixer input information. Changing this target does not analyze audio or change existing gains.")
             }
         }
         .formStyle(.grouped)
-        .frame(width: 520)
+        .frame(width: 620)
         .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+private struct SettingsNumberControl: View {
+    let title: String
+    let unit: String
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+    let identifier: String
+    let precision: Int
+
+    var body: some View {
+        LabeledContent(title) {
+            HStack(spacing: 6) {
+                TextField(title, value: Binding(
+                    get: { value },
+                    set: { if $0.isFinite { value = min(range.upperBound, max(range.lowerBound, $0)) } }
+                ), format: .number.precision(.fractionLength(0...precision)))
+                .labelsHidden()
+                .textFieldStyle(.roundedBorder)
+                .multilineTextAlignment(.trailing)
+                .frame(width: 84)
+                .accessibilityLabel(title)
+                .accessibilityIdentifier(identifier)
+                Text(unit).foregroundStyle(.secondary)
+            }
+        }
     }
 }
 

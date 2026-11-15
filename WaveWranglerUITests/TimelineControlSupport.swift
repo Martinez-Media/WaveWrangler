@@ -19,7 +19,13 @@ func closeTimelineMore(in app: XCUIApplication) {
 @MainActor
 func revealTimelineControl(_ element: XCUIElement, in app: XCUIApplication) -> Bool {
     closeTimelineMore(in: app)
-    guard element.exists else { return false }
+    if !element.exists {
+        openTimelineMore(in: app)
+        guard element.exists else {
+            closeTimelineMore(in: app)
+            return false
+        }
+    }
     let identifier = element.identifier
     let isTimelineControl = (identifier.hasPrefix("alignment.waveforms.")
             && !identifier.hasPrefix("alignment.waveforms.track."))

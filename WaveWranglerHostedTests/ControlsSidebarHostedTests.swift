@@ -143,6 +143,7 @@ struct ControlsSidebarHostedTests {
         #expect(state.workspaceInspector == .alignment && !state.inspectorPresented)
         state.toggleWorkspaceInspector(.transcript)
         #expect(state.workspaceInspector == .transcript && state.inspectorPresented)
+        #expect(!state.reviewPanelPresented, "Opening an inspector must not open a second workspace.")
         state.toggleInspector()
         #expect(!state.inspectorPresented && state.workspaceInspector == .transcript)
         state.toggleInspector()

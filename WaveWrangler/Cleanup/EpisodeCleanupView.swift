@@ -599,11 +599,14 @@ private struct CleanupWaveform: View {
 struct CleanupInspectorView: View {
     @Bindable var model: EpisodeCleanupModel
     @State private var transcriptReadingExpanded = false
-    private var hasFocusedReview: Bool { model.selectedFiller != nil || model.selectedManualCut != nil }
+    private var hasFocusedReview: Bool {
+        model.selectedFiller != nil || model.selectedManualCut != nil || model.selectedSpeakerMute != nil || model.selectedWord != nil
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Transcript & Review").wwFont(.headline)
+            Text(model.selectedSpeakerMute != nil ? "Speaker mute" : model.selectedManualCut != nil ? "Global cut" : "Transcript & Review")
+                .wwFont(.headline)
             if !hasFocusedReview {
                 Text("Select a row in the bottom review list to center its interval and edit it here.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -679,6 +682,16 @@ struct CleanupInspectorView: View {
                 if let review = cut.markerID {
                     FillerIntervalSizeControls(model: model, reviewID: review, prefix: "ww.review.inspector.size")
                 }
+            } else if let mute = model.selectedSpeakerMute {
+                Text(model.state.store.residentModel.speaker(mute.speaker)?.name ?? "Speaker")
+                    .font(.callout.weight(.semibold))
+                Text("\(AlignmentPresentation.formatTime(mute.alignedStart)) – \(AlignmentPresentation.formatTime(mute.alignedEnd))")
+                    .font(.caption.monospacedDigit())
+                Text("Saved silence for this speaker only. No time is removed; other speakers are unchanged.")
+                    .font(.caption)
+                Button("Remove speaker mute", systemImage: "speaker.wave.2") { model.removeSpeakerMute(mute.id) }
+                    .disabled(!model.state.canEdit || model.isBusy || model.isRefreshing)
+                    .accessibilityIdentifier("ww.inspector.speakerMute.remove")
             }
             if let lane = model.plan?.lanes.first(where: { $0.speaker == model.selectedSpeaker }) {
                 Text(lane.name).wwFont(.headline)

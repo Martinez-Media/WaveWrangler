@@ -10,9 +10,13 @@ Switching modes stops the current audition; selecting a mode does not start it.
 ## Show or detach the mixer
 
 Choose **View > Show Mixer** or the mixer control in the workspace.
-Review and Mixer share the resizable bottom pane. **Detach mixer** or
+Review, Mixer, Alignment, and Recordings & Speakers share the resizable bottom pane. **Detach mixer** or
 **View > Pop Out Mixer** opens a native mixer window; **Reattach** returns it
 to the editor. Option-clicking the toolbar's Mixer control also detaches it.
+
+In **Settings > Workspace**, enable **Open workspaces in separate windows**
+to use separate windows by default. Opening an existing window focuses it rather
+than creating another. Changing the preference leaves open panels where they are.
 
 Each editor owns its mixer window and transport binding. Opening the mixer does
 not start playback or change source-listening choices. Closing its originating

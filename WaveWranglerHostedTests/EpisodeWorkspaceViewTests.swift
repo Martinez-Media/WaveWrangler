@@ -36,7 +36,7 @@ struct EpisodeWorkspaceViewTests {
         let saved = listening.workspace
         let reopened = ShowWindowState(store: ShowDocumentStore(model: model), episodeID: episode.id)
         #expect(reopened.listeningState(for: episode.id).workspace == saved)
-        #expect(reopened.bottomPaneContent == .mixer && reopened.bottomPanePresented && !reopened.reviewPanelPresented)
+        #expect(reopened.bottomPaneContent == .recordings && reopened.bottomPanePresented && !reopened.reviewPanelPresented)
         #expect(reopened.workspaceInspector == .transcript && !reopened.inspectorPresented && reopened.recordingsPresented)
         #expect(reopened.listeningState(for: episode.id).playback == .init(), "Saved views do not restore an old Solo/Mute mix")
         #expect(reopened.listeningState(for: other.id).workspace == EpisodeWorkspaceViewState())

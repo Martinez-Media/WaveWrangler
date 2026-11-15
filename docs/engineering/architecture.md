@@ -96,10 +96,20 @@ Retirement drops disposable registrations, not canonical history or verified fil
 buffers and native playback clock. `EpisodeMixerController` owns the episode's
 production processor and native-state integration.
 
-Docked/detached mixer and review surfaces reuse their originating model.
+Review, Mixer, Alignment, and Recordings & Speakers share one bottom workbench
+and can be detached independently. The right inspector exposes Selection and
+Episode contexts; revealing a workbench does not reveal a second inspector.
+Docked/detached surfaces reuse their originating model. The setup command
+controller is retained by `ShowWindowState` across docking; source-engine leases
+remain attached to the originating editor, not the temporary working window.
 Detachment creates no second transport, permission registry or document.
 Auxiliary windows do not keep a windowless document alive and close with their
 originating editor.
+
+`WWWorkspacesInSeparateWindows` is a device-local opening preference, not a
+document property or automatic migration of already-open views. Each tool
+remembers its native window frame and recovers an unreachable title bar when
+monitors change. Existing windows are focused instead of duplicated.
 
 | Seam | Role |
 | --- | --- |

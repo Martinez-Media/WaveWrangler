@@ -355,8 +355,7 @@ struct FillerTimingReviewSummary: View {
                 VStack(alignment: .leading, spacing: 6) { heading; actions }
             }
             Button("Open review list", systemImage: "rectangle.bottomthird.inset.filled") {
-                model.state.reviewPanelPresented = true
-                if model.state.destination != .alignment { model.state.select(.alignment) }
+                model.state.openWorkspace(.review)
             }
             .help("Open the resizable bottom list. Select a row to center and zoom its word interval.")
             .accessibilityIdentifier("ww.cleanup.fillers.history")

@@ -175,7 +175,25 @@ struct AlignmentWaveformView: View {
                             : "Enable a recorder and track below, or refresh audio to load a measured window.")
                     )
                     .frame(minHeight: 200)
-                } else if layout == .overlay {
+                } else {
+                VStack(spacing: 0) {
+                if let cleanup, !model.isSourceTimePreview, !cleanup.activeManualCuts.isEmpty {
+                    AudioTimelineTrackRow(headerWidth: headerWidth) {
+                        Label("Global cuts", systemImage: "scissors")
+                            .font(.caption.weight(.semibold))
+                    } content: {
+                        ManualCutMarkers(model: cleanup) {
+                            if let track = visibleTracks.first(where: { $0.id == activeSourceID }) ?? visibleTracks.first {
+                                model.selectWaveform(track)
+                                cleanup.selectedSpeaker = model.trackSpeakerID(track.id)
+                            }
+                        }
+                        .frame(height: 24)
+                    }
+                    .padding(.horizontal, 8)
+                }
+                Group {
+                if layout == .overlay {
                     overlay
                 } else if layout == .speakersOnly {
                     ForEach(model.primaryWaveformGroups) { speakerLanes($0) }
@@ -189,6 +207,16 @@ struct AlignmentWaveformView: View {
                     ForEach(groups, id: \.self) { group in
                         groupLane(group)
                     }
+                }
+                }
+                .overlay {
+                    if let cleanup, !model.isSourceTimePreview {
+                        GlobalCutGuides(model: cleanup)
+                            .padding(.leading, headerWidth + 16)
+                            .padding(.trailing, 8)
+                    }
+                }
+                }
                 }
                 if layout == .overlay { recordings }
                 if !model.ungroupedSources.isEmpty { ungroupedSection }
@@ -726,15 +754,6 @@ struct AlignmentWaveformView: View {
             }
             .overlay {
                 if let cleanup {
-                    ManualCutMarkers(model: cleanup) {
-                        guard let track = tracks.first(where: { $0.id == activeSourceID }) ?? tracks.first else { return }
-                        model.selectWaveform(track)
-                        cleanup.selectedSpeaker = speakerGroup.id ?? model.trackSpeakerID(track.id)
-                    }
-                }
-            }
-            .overlay {
-                if let cleanup {
                     ForEach(cleanup.plan?.lanes.filter { lane in tracks.contains { $0.id == lane.primary.sourceID } } ?? []) { lane in
                         FillerTimingOverlay(model: cleanup, reviews: cleanup.visibleFillers(for: lane))
                     }
@@ -849,6 +868,18 @@ struct AlignmentWaveformView: View {
                         .accessibilityIdentifier("alignment.waveforms.state.\(track.id)")
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                Button {
+                    model.selectWaveform(track)
+                } label: {
+                    Color.clear.contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Select \(track.name)")
+                .accessibilityHidden(true)
+                .help("Select this recording to inspect its details.")
+            }
         } content: {
             if hasWaveformSamples(track) {
                 GeometryReader { geometry in
@@ -916,14 +947,6 @@ struct AlignmentWaveformView: View {
                 .overlay {
                     if let cleanup, let speaker = muteSpeaker(for: track, explicit: speaker), !model.isSourceTimePreview {
                         SpeakerMuteMarkers(model: cleanup, speaker: speaker) { model.selectWaveform(track) }
-                    }
-                }
-                .overlay {
-                    if let cleanup {
-                        ManualCutMarkers(model: cleanup) {
-                            model.selectWaveform(track)
-                            cleanup.selectedSpeaker = speaker ?? model.trackSpeakerID(track.id)
-                        }
                     }
                 }
                 .overlay {

@@ -72,14 +72,18 @@ struct TranscriptionSettingsView: View {
                     }
                 }
                 .accessibilityIdentifier("ww.settings.transcription.workers")
-                Text("One worker transcribes one speaker's Primary track. Start with one; two improved throughput in our M5 Max pilot. Extra workers can serve other episodes; all windows share the same budget.")
+                Text("One worker transcribes one speaker's Primary track. All windows share the same resource budget. Start with one worker.")
                     .wwFont(.caption)
+                Text("Model, hardware, and threads apply to the next job, not active or queued jobs. Lowering workers lets active tracks finish.")
+                    .wwFont(.caption)
+                DisclosureGroup("Resource limits and backend details") {
                 Text("App-wide ceilings: \(settings.workerPool.budget.cpuThreads) requested Whisper threads, \(settings.workerPool.budget.metalWorkers) Metal workers, and \(ByteCountFormatter.string(fromByteCount: Int64(settings.workerPool.budget.memoryBytes), countStyle: .memory)) of conservative memory reservations, including weights and render buffers. A job can queue below your worker limit. Accelerate and Metal may use additional system threads; this is not a total OS-memory cap.")
                     .wwFont(.caption)
                 Text("Model, hardware, and threads are captured for the next job and saved with its transcript. Changing them never retargets active or queued jobs. Lowering workers lets active tracks finish before admitting more. Metal threads also control command-buffer submission; more is not necessarily faster.")
                     .wwFont(.caption)
                 Text("Neural Engine / Core ML is not enabled. Our encoder-only candidate did not consistently beat Metal end to end, needed extra converted weights, and changed some recognition. No pure Neural Engine mode is claimed.")
                     .wwFont(.caption)
+                }
             }
             Section("Privacy & accuracy") {
                 Text("Download fetches only the selected MIT-licensed model from Hugging Face's ggerganov/whisper.cpp repository. Models are kept in this app's Application Support folder. No recording or transcript is uploaded.")

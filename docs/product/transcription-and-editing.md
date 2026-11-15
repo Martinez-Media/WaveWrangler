@@ -75,6 +75,10 @@ A synchronized cut removes the shared interval across aligned spoken tracks,
 keeping their conversation synchronized. Unpinned supplemental clips follow
 their timeline anchors; pinned clips retain their program positions.
 
+The **Global cuts** rail shows one cut badge per saved cut. Guides span the
+spoken tracks and their gaps; supplemental clip media is not trimmed by these
+guides. Speaker mute regions remain local to their speaker's lane.
+
 Use **Show cut** to reveal removed audio for review without restoring it.
 The inline toolbar provides action-specific hover help. Its Play action auditions
 the edited join while collapsed and the removed audio while expanded;

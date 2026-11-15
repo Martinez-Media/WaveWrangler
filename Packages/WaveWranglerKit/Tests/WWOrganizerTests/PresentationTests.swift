@@ -34,6 +34,16 @@ struct PreferencesTests {
         #expect(AppPreferences.registrationDefaults["WWDownloadSourcesAutomatically"] as? Bool == true)
     }
 
+    @Test func separateWorkspacePreferenceIsDeviceLocalAndDefaultsToDocked() {
+        let defaults = freshDefaults()
+        let preferences = AppPreferences(defaults: defaults)
+        #expect(!preferences.workspacesInSeparateWindows)
+        preferences.workspacesInSeparateWindows = true
+        #expect(AppPreferences(defaults: defaults).workspacesInSeparateWindows)
+        preferences.workspacesInSeparateWindows = false
+        #expect(!AppPreferences(defaults: defaults).workspacesInSeparateWindows)
+    }
+
     @Test func textSizeStepsFrom100To200In25PercentSteps() {
         #expect(TextSize.all.map(\.percent) == [100, 125, 150, 175, 200])
         #expect(TextSize.actual.smaller == nil)

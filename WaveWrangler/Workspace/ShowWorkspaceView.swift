@@ -62,33 +62,6 @@ private struct ShowWindowContent: View {
                     .wwAppEnvironment()
             }
         }
-        .sheet(isPresented: $state.recordingsPresented) {
-            if let episode = state.selectedEpisode {
-                VStack(spacing: 0) {
-                    HStack {
-                        Text("Recordings & Speakers").font(.headline)
-                        Spacer()
-                        Button("Done") { state.recordingsPresented = false }
-                            .keyboardShortcut(.defaultAction)
-                    }.padding(12)
-                    SetupContainerView(state: state, episode: episode)
-                }
-                .frame(minWidth: 760, idealWidth: 1000, maxWidth: .infinity,
-                       minHeight: 540, idealHeight: 680, maxHeight: .infinity)
-                .presentationSizing(.fitted)
-                .wwAppEnvironment()
-                .onCommand(
-                    Selector(("undo:")),
-                    perform: store.document?.undoManager?.canUndo == true
-                        ? { store.document?.undoManager?.undo() } : nil
-                )
-                .onCommand(
-                    Selector(("redo:")),
-                    perform: store.document?.undoManager?.canRedo == true
-                        ? { store.document?.undoManager?.redo() } : nil
-                )
-            }
-        }
     }
 
     private var core: some View {
@@ -104,15 +77,17 @@ private struct ShowWindowContent: View {
                 .accessibilityIdentifier("ww.show.library")
             }
             ToolbarSpacer(.fixed, placement: .primaryAction)
+            if state.destination != .alignment {
             ToolbarItem(placement: .primaryAction) {
                 Button("Recordings & Speakers", systemImage: "person.2") {
-                    state.recordingsPresented = true
+                    state.openWorkspace(.recordings)
                 }
                 .disabled(state.selectedEpisode == nil)
                 .accessibilityIdentifier("ww.show.recordings")
                 .help("Manage this episode's recordings and speakers")
             }
             ToolbarSpacer(.fixed, placement: .primaryAction)
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button("Export", systemImage: "square.and.arrow.up") { state.requestExport() }
                     .disabled(state.exportUnavailableReason != nil)

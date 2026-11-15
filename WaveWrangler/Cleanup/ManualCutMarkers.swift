@@ -31,6 +31,38 @@ struct ManualCutMarkers: View {
     }
 }
 
+struct GlobalCutGuides: View {
+    @Bindable var model: EpisodeCleanupModel
+
+    var body: some View {
+        GeometryReader { geometry in
+            Canvas { context, size in
+                for cut in model.activeManualCuts {
+                    let start = model.cutTimeline.editedTime(forAlignedTime: cut.alignedStart)
+                    let x = (start - model.windowStart) / model.visibleDuration * size.width
+                    if model.expandedManualCut?.id == cut.id {
+                        let end = model.cutTimeline.editedTime(forAlignedTime: cut.alignedEnd)
+                        let right = (end - model.windowStart) / model.visibleDuration * size.width
+                        let lower = max(0, x), upper = min(size.width, right)
+                        if upper > lower {
+                            context.fill(Path(CGRect(x: lower, y: 0, width: upper - lower, height: size.height)),
+                                with: .color(.red.opacity(0.08)))
+                        }
+                    }
+                    if x >= 0 && x <= geometry.size.width {
+                        var seam = Path()
+                        seam.move(to: CGPoint(x: x, y: 0))
+                        seam.addLine(to: CGPoint(x: x, y: size.height))
+                        context.stroke(seam, with: .color(.red), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                    }
+                }
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
 private struct ManualCutMarkerButton: View {
     @Bindable var model: EpisodeCleanupModel
     let cut: ManualEpisodeCut

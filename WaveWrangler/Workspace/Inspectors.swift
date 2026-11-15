@@ -8,14 +8,7 @@ struct InspectorContainer: View {
     @Bindable var state: ShowWindowState
 
     var body: some View {
-        if state.destination == .alignment, state.workspaceInspector == .alignment,
-           let model = state.alignmentModel {
-            AlignmentDetailInspector(model: model)
-                .wwFont(.body)
-                .disabled(TrackProcessingOperation.current(alignment: model, cleanup: state.cleanupModel) != nil)
-        } else {
-            InspectorScrollContent(state: state)
-        }
+        InspectorScrollContent(state: state)
     }
 }
 
@@ -34,11 +27,14 @@ private struct InspectorScrollContent: View {
                             if model.audioEditor.selectedTrack != nil {
                                 AudioClipInspector(editor: model.audioEditor,
                                     playhead: model.presentationTimeline.programTime(forDisplayTime: model.waveformPlayheadSeconds))
+                            } else if let cleanup = state.cleanupModel,
+                                      cleanup.selectedFiller != nil || cleanup.selectedManualCut != nil || cleanup.selectedSpeakerMute != nil || cleanup.selectedWord != nil {
+                                CleanupInspectorView(model: cleanup)
                             } else {
-                                AlignmentInspectorView(model: model, manageRecordings: { state.recordingsPresented = true })
+                                AlignmentInspectorView(model: model, manageRecordings: { state.openWorkspace(.recordings) })
                             }
                         case .alignment:
-                            Text("Preparing alignment inspection…")
+                            Button("Open Alignment workspace") { state.openWorkspace(.alignment) }
                         case .transcript:
                             if let cleanup = state.cleanupModel { CleanupInspectorView(model: cleanup) }
                         case .episode:

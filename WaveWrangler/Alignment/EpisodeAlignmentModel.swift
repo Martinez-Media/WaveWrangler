@@ -186,6 +186,7 @@ final class EpisodeAlignmentModel {
     var auditionStartSeconds = 0.0
     var auditionDurationSeconds = 5.0
     var editorRequest: AlignmentEditorRequest?
+    var collapsedAlignmentGroups: Set<RecorderGroupID> = []
     var anchorSelection: Int?
     var requestedAnchorFocus: Int?
     var requestedEpochFocus: RecordingEpochID?

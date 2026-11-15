@@ -171,15 +171,8 @@ struct AlignmentWorkspace: View {
         .onChange(of: model.requestedEpochFocus) { _, epoch in
             if epoch != nil { revealAlignmentInspector() }
         }
-        .sheet(item: $model.editorRequest) { request in
-            switch request {
-            case .numeric:
-                NumericTimingSheet(model: model)
-            case .anchors:
-                AnchorTimingSheet(model: model)
-            case let .anchor(anchorID):
-                EditAnchorSheet(model: model, anchorID: anchorID)
-            }
+        .onChange(of: model.editorRequest) { _, request in
+            if request != nil { revealAlignmentInspector() }
         }
         .sheet(item: Binding(get: { model.audioEditor.importer.review }, set: {
             model.audioEditor.importer.review = $0
@@ -206,25 +199,21 @@ struct AlignmentWorkspace: View {
             VStack(spacing: 0) {
                 HStack {
                     Picker("Bottom pane", selection: $state.bottomPaneContent) {
-                        ForEach(EpisodeBottomPaneContent.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                        ForEach(EpisodeBottomPaneContent.allCases, id: \.self) {
+                            Text($0 == .recordings ? "Recordings" : $0.rawValue).tag($0)
+                        }
                     }
-                    .pickerStyle(.segmented).labelsHidden().frame(width: 180)
+                    .pickerStyle(.segmented).labelsHidden().frame(width: 380)
                     .accessibilityIdentifier("ww.bottomPane.content")
                     Spacer()
-                    if state.bottomPaneContent == .review, !state.reviewPresentation.isDetached {
-                        Button("Detach review", systemImage: "arrow.up.forward.square") {
-                            state.reviewPresentation.detach()
+                    if !state.workspaceIsDetached(state.bottomPaneContent) {
+                        Button("Detach \(state.bottomPaneContent.rawValue)", systemImage: "arrow.up.forward.square") {
+                            state.detachWorkspace(state.bottomPaneContent)
                         }
                         .labelStyle(.iconOnly)
-                        .help("Open Transcript & Review in a separate window for this episode.")
-                        .accessibilityIdentifier("ww.review.detach")
-                    } else if state.bottomPaneContent == .mixer, !state.mixerPresentation.isDetached {
-                        Button("Detach mixer", systemImage: "macwindow.on.rectangle") {
-                            state.mixerPresentation.detach()
-                        }
-                        .labelStyle(.iconOnly)
-                        .help("Open the production mixer in a separate window, including when the docked content has yielded space to the tracks.")
-                        .accessibilityIdentifier("ww.bottomPane.detachMixer")
+                        .help("Open this workspace in a separate window for this episode.")
+                        .accessibilityIdentifier(state.bottomPaneContent == .review ? "ww.review.detach"
+                            : state.bottomPaneContent == .mixer ? "ww.bottomPane.detachMixer" : "ww.bottomPane.detach")
                     }
                     Button("Hide bottom pane", systemImage: "xmark") { state.bottomPanePresented = false }
                         .labelStyle(.iconOnly).accessibilityIdentifier("ww.bottomPane.hide")
@@ -233,7 +222,19 @@ struct AlignmentWorkspace: View {
                     .layoutPriority(1)
                 Divider()
                 Group {
-                if state.bottomPaneContent == .review, let cleanup = state.cleanupModel {
+                if state.bottomPaneContent == .recordings || state.bottomPaneContent == .alignment {
+                    if state.workspaceIsDetached(state.bottomPaneContent) {
+                        VStack(spacing: 8) {
+                            Text("\(state.bottomPaneContent.rawValue) is in a separate window.")
+                            HStack {
+                                Button("Show Window") { state.detachWorkspace(state.bottomPaneContent) }
+                                Button("Reattach") { state.reattachWorkspace(state.bottomPaneContent) }
+                            }
+                        }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        EpisodeWorkbenchContent(state: state, content: state.bottomPaneContent)
+                    }
+                } else if state.bottomPaneContent == .review, let cleanup = state.cleanupModel {
                     if state.reviewPresentation.isDetached {
                         VStack(spacing: 8) {
                             Text("Transcript & Review is in a separate window.")
@@ -288,15 +289,12 @@ struct AlignmentWorkspace: View {
     private var waveforms: some View {
         AlignmentWaveformView(model: model, cleanup: state.cleanupModel,
             showTranscript: {
-                state.reviewPanelPresented = true
-                state.workspaceInspector = .transcript
-                state.inspectorPresented = true
+                state.openWorkspace(.review)
             }, showInspector: showInspector, sourceEditingEnabled: state.canEdit, workspaceState: state)
     }
 
     private func revealAlignmentInspector() {
-        state.workspaceInspector = .alignment
-        state.inspectorPresented = true
+        state.openWorkspace(.alignment)
     }
 }
 
@@ -308,7 +306,7 @@ struct AlignmentDetailInspector: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                 Text("Alignment").font(.headline).accessibilityAddTraits(.isHeader)
-                Text("Recorder groups, recording segments, timing, and anchors. Scroll tables horizontally for all columns.")
+                Text("Episode-wide recorder groups and recording segments. Select a segment to inspect its anchors and timing.")
                     .font(.caption).foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 12) {
                 ScrollView(.horizontal) {
@@ -350,6 +348,7 @@ struct AlignmentDetailInspector: View {
                 .id("ww.alignment.anchorSection")
 
                 VStack(alignment: .leading, spacing: 8) {
+                    if model.canAcceptProposal {
                     Button("Accept measured interval") { model.acceptProposal() }
                         .disabled(!model.canAcceptProposal)
                         .help("Accept only the measured audio interval; unmeasured frames stay unplaced.")
@@ -358,6 +357,7 @@ struct AlignmentDetailInspector: View {
                         .disabled(!model.canAcceptProposal)
                         .help("Reject this proposal and leave the recording segment unsupported.")
                         .accessibilityIdentifier("alignment.rejectProposal")
+                    }
                     Button("Edit Numerically…") { model.requestNumericEditor() }
                         .disabled(!model.canCorrect)
                         .help(model.canCorrect ? "Type a signed rate and offset correction." : "Select a recording segment that can be timed manually.")
@@ -366,6 +366,11 @@ struct AlignmentDetailInspector: View {
                         .disabled(!model.canCorrect)
                         .help(model.canCorrect ? "Type source and aligned time anchors." : "Select a recording segment that can be timed manually.")
                         .accessibilityIdentifier("alignment.placeAnchors")
+                    if !model.canCorrect && !model.canAcceptProposal {
+                        Text("Select a recording segment to edit its timing. The reference remains fixed.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Menu("Anchor actions", systemImage: "pin") {
                     Button("Place Anchor at Playhead") { model.placeAnchorAtPlayhead() }
                         .disabled(!model.canPlaceAnchorAtPlayhead)
                         .help(
@@ -390,6 +395,7 @@ struct AlignmentDetailInspector: View {
                               ? "Split this occurrence at the selected anchor."
                               : "Select an anchor inside an accepted map's recorded span, not at either end.")
                         .accessibilityIdentifier("alignment.startNewEpoch")
+                    }
                 }
                 .accessibilityElement(children: .contain)
                 .accessibilityLabel("Alignment timing actions")
@@ -472,7 +478,7 @@ struct AlignmentDetailInspector: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(14)
             }
-            .accessibilityLabel("Alignment inspector")
+            .accessibilityLabel("Alignment workspace")
             .accessibilityIdentifier("ww.inspector.alignment.details")
             .onChange(of: model.requestedAnchorFocus, initial: true) { _, anchor in
                 guard let anchor else { return }
@@ -484,6 +490,13 @@ struct AlignmentDetailInspector: View {
                 scrollProxy.scrollTo("ww.alignment.groupSection", anchor: .top)
                 AlignmentEpochFocus.focus(epoch: epoch, model: model, in: NSApp.keyWindow)
             }
+            .sheet(item: $model.editorRequest) { request in
+                switch request {
+                case .numeric: NumericTimingSheet(model: model)
+                case .anchors: AnchorTimingSheet(model: model)
+                case let .anchor(anchorID): EditAnchorSheet(model: model, anchorID: anchorID)
+                }
+            }
         }
     }
 
@@ -492,7 +505,6 @@ struct AlignmentDetailInspector: View {
 private struct AlignmentOutlineTable: View {
     @Bindable var model: EpisodeAlignmentModel
     @State private var selection: AlignmentOutlineRow.ID?
-    @State private var collapsedGroups: Set<AlignmentOutlineRow.ID> = []
 
     var body: some View {
         Table(of: AlignmentOutlineRow.self, selection: $selection) {
@@ -576,9 +588,11 @@ private struct AlignmentOutlineTable: View {
 
     private func expansionBinding(for id: AlignmentOutlineRow.ID) -> Binding<Bool> {
         Binding(
-            get: { !collapsedGroups.contains(id) },
+            get: { id.groupID.map { !model.collapsedAlignmentGroups.contains($0) } ?? true },
             set: { expanded in
-                if expanded { collapsedGroups.remove(id) } else { collapsedGroups.insert(id) }
+                guard let group = id.groupID else { return }
+                if expanded { model.collapsedAlignmentGroups.remove(group) }
+                else { model.collapsedAlignmentGroups.insert(group) }
             }
         )
     }
@@ -666,6 +680,11 @@ private struct AlignmentOutlineRow: Identifiable {
 
             var epochID: RecordingEpochID? {
                 guard case let .epoch(id) = self else { return nil }
+                return id
+            }
+
+            var groupID: RecorderGroupID? {
+                guard case let .group(id) = self else { return nil }
                 return id
             }
         }
@@ -881,7 +900,7 @@ struct AlignmentInspectorView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Recording")
+            Text("Recording / channel")
                 .font(.headline)
             Picker("Recording", selection: Binding(
                 get: { model.selectedWaveformSource },
@@ -906,10 +925,13 @@ struct AlignmentInspectorView: View {
                 Text(track.groupName).font(.subheadline.weight(.semibold))
                 Text(track.name).font(.caption).foregroundStyle(.secondary)
                 AlignmentTrackAssignmentControls(model: model, track: track)
+                Text("Recording listening").font(.caption.weight(.semibold))
                 AudioTimelineListeningButtons(listening: model.listening, scope: .source(track.id), name: track.name,
                                               changed: { model.refreshListeningGains() })
+                Text("Recorder-group listening").font(.caption.weight(.semibold))
                 AudioTimelineListeningButtons(listening: model.listening, scope: .recorder(track.group), name: track.groupName,
                                               changed: { model.refreshListeningGains() })
+                DisclosureGroup("Alignment and comparison") {
                 if track.envelope.channelCount > 1 {
                     Picker("Comparison channel", selection: $model.waveformAuditionChannel) {
                         ForEach(0..<track.envelope.channelCount, id: \.self) { channel in
@@ -925,6 +947,7 @@ struct AlignmentInspectorView: View {
                 .help("Listen to the reference on the left and this recording on the right, using saved timing.")
                 .accessibilityIdentifier("alignment.waveforms.compare")
                 AlignmentAnchorControls(model: model, track: track)
+                }
             }
             if let point = model.waveformPickedPoint,
                point.source != model.selectedWaveformSource,

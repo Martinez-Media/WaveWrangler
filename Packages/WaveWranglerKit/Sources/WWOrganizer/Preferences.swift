@@ -24,6 +24,7 @@ public enum PreferenceKey {
     public static let timelineJumpSeconds = "WWTimelineJumpSeconds"
     public static let cutJumpBackSeconds = "WWCutJumpBackSeconds"
     public static let autoInputGainTargetDBFS = "WWAutoInputGainTargetDBFS"
+    public static let workspacesInSeparateWindows = "WWWorkspacesInSeparateWindows"
 }
 
 /// Typed accessor over a `UserDefaults` store with the product defaults applied.
@@ -55,6 +56,11 @@ public struct AppPreferences {
     public var autosaveEnabled: Bool {
         get { defaults.object(forKey: PreferenceKey.autosaveEnabled) as? Bool ?? Self.defaultAutosaveEnabled }
         nonmutating set { defaults.set(newValue, forKey: PreferenceKey.autosaveEnabled) }
+    }
+
+    public var workspacesInSeparateWindows: Bool {
+        get { defaults.object(forKey: PreferenceKey.workspacesInSeparateWindows) as? Bool ?? false }
+        nonmutating set { defaults.set(newValue, forKey: PreferenceKey.workspacesInSeparateWindows) }
     }
 
     public var downloadSourcesAutomatically: Bool {
@@ -153,13 +159,17 @@ public struct TextSize: Hashable, Sendable, Comparable, CustomStringConvertible 
 /// Settings panes (commands-keyboard §7).
 public enum SettingsPane: String, CaseIterable, Sendable {
     case general
+    case workspace
+    case editing
     case sources
     case transcription
 
     public var title: String {
         switch self {
         case .general: "General"
-        case .sources: "Sources"
+        case .workspace: "Workspace"
+        case .editing: "Editing & Playback"
+        case .sources: "Sources & Audio"
         case .transcription: "Transcription"
         }
     }
@@ -167,6 +177,8 @@ public enum SettingsPane: String, CaseIterable, Sendable {
     public var symbolName: String {
         switch self {
         case .general: "gearshape"
+        case .workspace: "macwindow.on.rectangle"
+        case .editing: "scissors"
         case .sources: "music.mic"
         case .transcription: "waveform"
         }

@@ -14,6 +14,7 @@ struct EpisodeSetupContent: View {
     @State private var controller: EpisodeSetupViewController?
     @State private var connecting = false
     @State private var visible = true
+    @State private var hostingWindowID: ObjectIdentifier?
 
     var body: some View {
         Group {
@@ -40,6 +41,7 @@ struct EpisodeSetupContent: View {
         }
         .onDisappear {
             visible = false
+            guard controller?.window.map(ObjectIdentifier.init) == hostingWindowID else { return }
             // The show's engine stays leased to the window (downloads keep running); only this view's
             // observation stops. The lease ends when the window closes.
             controller?.model.isOnScreen = false
@@ -49,20 +51,26 @@ struct EpisodeSetupContent: View {
 
     private func connect(to window: NSWindow?) {
         guard let window, visible else { return }
+        hostingWindowID = ObjectIdentifier(window)
         if let controller {
             controller.attach(to: window)
             ShowWindowRegistry.state(for: window)?.setupModelDidAttach(controller.model)
             return
         }
         guard !connecting else { return }
+        let state = ShowWindowRegistry.state(for: window)
+        if reuseController(from: state, in: window) { return }
         connecting = true
         Task { @MainActor in
-            let engine = await SetupEngineProvider.engine(for: window, show: store.residentModel.show.id)
-            let state = ShowWindowRegistry.state(for: window)
+            let engine = await SetupEngineProvider.engine(for: state?.window ?? window, show: store.residentModel.show.id)
             guard visible, state == nil || (
                 (state?.destination == .setup || state?.destination == .alignment)
                     && state?.selectedEpisodeID == episodeID
             ) else {
+                connecting = false
+                return
+            }
+            if reuseController(from: state, in: window) {
                 connecting = false
                 return
             }
@@ -80,11 +88,21 @@ struct EpisodeSetupContent: View {
             controller.attach(to: window)
             model.isOnScreen = true
             state?.setupModelDidAttach(model)
+            state?.setupController = controller
             self.controller = controller
             connecting = false
             model.startObserving()
             model.ensureConfirmedOverviews()
         }
+    }
+
+    private func reuseController(from state: ShowWindowState?, in window: NSWindow) -> Bool {
+        guard let shared = state?.setupController, shared.model.episodeID == episodeID else { return false }
+        controller = shared
+        shared.attach(to: window)
+        shared.model.isOnScreen = true
+        shared.model.startObserving()
+        return true
     }
 }
 
