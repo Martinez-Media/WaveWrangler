@@ -71,6 +71,10 @@ The architecture and boundary details live in
 
 ## Review standards
 
+Finish with the [end-of-feature review](docs/engineering/feature-review.md):
+review the changed contract, classify evidence and choose the smallest relevant
+validation rather than applying a generic modernization checklist.
+
 Use small focused types, composition, Swift 6 isolation and Sendable value
 snapshots. Keep domain operations pure and throwing rather than partially
 mutating. Use American English for first-party names and prose, but preserve

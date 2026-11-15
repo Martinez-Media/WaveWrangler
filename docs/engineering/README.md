@@ -9,6 +9,7 @@ Current implementation contracts and development procedures. Start with
 | [Getting started](getting-started.md) | Toolchain, build, install, signing and isolated build output |
 | [Architecture](architecture.md) | Module boundaries, native document/window ownership and feature routing |
 | [Testing](testing.md) | Package/unhosted/hosted/UI layers, focused checks, concurrency and manual CI |
+| [End-of-feature review](feature-review.md) | Changed-contract review, Swift ownership, evidence-based improvements and final handoff |
 | [Persistence and source access](persistence-and-source-access.md) | Schemas, migration, publication/recovery, Undo, source authorization and immutable originals |
 | [Audio processing](audio-processing.md) | Rendering, production versus diagnostic audio, effects, transport and caches |
 | [Automatic alignment](automatic-alignment.md) | Acoustic proposals, adaptive provenance, acceptance and limits |

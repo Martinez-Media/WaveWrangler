@@ -37,6 +37,10 @@ Use existing helpers and typed operations before adding another abstraction.
 Package modules must not depend on the app. Pure kernels must not gain I/O,
 UI, approval APIs or concurrency merely to simplify a caller.
 
+For completed-feature or PR quality checks, follow the focused
+[feature-review procedure](docs/engineering/feature-review.md); the project
+`wavewrangler-feature-review` skill is its agent entry point.
+
 ## Language and state
 
 - Use Swift 6 concurrency/isolation and Sendable value snapshots. Keep domain

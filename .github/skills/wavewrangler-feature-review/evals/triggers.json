@@ -1,0 +1,22 @@
+[
+  {"id":"t01","query":"Run the WaveWrangler end-of-feature review on the current diff before handing it back.","should_trigger":true,"split":"train"},
+  {"id":"t02","query":"This feature is finished. Check our Swift ownership, DRY, documentation, and test paths before we call it ready.","should_trigger":true,"split":"train"},
+  {"id":"t03","query":"Review this PR's changes against WaveWrangler's media and persistence invariants; do not fix anything.","should_trigger":true,"split":"train"},
+  {"id":"t04","query":"Do a feature-review of the new transcript cache, including invalidation and resource limits.","should_trigger":true,"split":"train"},
+  {"id":"t05","query":"The mixer change is done; check that native state barriers and Undo still meet our patterns.","should_trigger":true,"split":"train"},
+  {"id":"t06","query":"Check this completed docs-only feature for developer/agent documentation drift and honest validation evidence.","should_trigger":true,"split":"train"},
+  {"id":"t07","query":"Before the handoff, audit the completed alignment feature for stale asynchronous results and smallest relevant regression paths.","should_trigger":true,"split":"validation"},
+  {"id":"t08","query":"Is the current change ready for seasoned Swift developers to maintain? Review the feature diff and its dependency seams.","should_trigger":true,"split":"validation"},
+  {"id":"t09","query":"Give this finished export feature a final quality gate: local media safety, cancellation, bounded work and related docs.","should_trigger":true,"split":"validation"},
+  {"id":"t10","query":"We've finished the Sources feature. Perform a PR review, distinguish proven defects from performance hypotheses, and report coverage gaps.","should_trigger":true,"split":"validation"},
+  {"id":"n01","query":"Review my staged Swift changes for bugs only; do not run the WaveWrangler end-of-feature standards or quality gate.","should_trigger":false,"split":"train"},
+  {"id":"n02","query":"Check just this one proposed finding: does this Sendable wrapper actually have a data race? This is not a completed-feature review.","should_trigger":false,"split":"train"},
+  {"id":"n03","query":"Review every module in the entire codebase and create a modernization roadmap, not a feature diff review.","should_trigger":false,"split":"train"},
+  {"id":"n04","query":"Create a new reusable skill for end-of-feature reviews.","should_trigger":false,"split":"train"},
+  {"id":"n05","query":"Find exploitable security vulnerabilities in this repository.","should_trigger":false,"split":"train"},
+  {"id":"n06","query":"Finish this pull request, watch CI, and merge it when it is ready.","should_trigger":false,"split":"train"},
+  {"id":"n07","query":"Run the existing focused package test selector and report its result, without reviewing code.","should_trigger":false,"split":"validation"},
+  {"id":"n08","query":"Update the getting-started instructions to mention the minimum Swift tools version.","should_trigger":false,"split":"validation"},
+  {"id":"n09","query":"Review this standalone Swift function for an off-by-one bug, not a project-pattern or feature handoff review.","should_trigger":false,"split":"validation"},
+  {"id":"n10","query":"Profile playback on my physical Mac and read my recording to diagnose a device-specific issue; this is not a feature review.","should_trigger":false,"split":"validation"}
+]
