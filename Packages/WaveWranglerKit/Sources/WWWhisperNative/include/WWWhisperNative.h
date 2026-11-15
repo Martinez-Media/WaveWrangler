@@ -77,4 +77,19 @@ WWNativeTranscript ww_whisper_infer_window_configured(
     WWWhisperConfiguration configuration, int32_t (*canceled)(void *), void *cancel_context
 );
 
+typedef struct {
+    double initialization_wait_seconds;
+    double context_setup_seconds;
+    double inference_seconds;
+    double context_disposal_seconds;
+    int32_t inference_aborted;
+} WWWhisperLifecycleMetrics;
+
+// Optional diagnostics use the same independent-context inference path, not a reusable context.
+WWNativeTranscript ww_whisper_infer_window_measured(
+    void *model_bytes, size_t model_size, const float *pcm, int32_t sample_count,
+    WWWhisperConfiguration configuration, int32_t (*canceled)(void *), void *cancel_context,
+    WWWhisperLifecycleMetrics *metrics
+);
+
 #endif

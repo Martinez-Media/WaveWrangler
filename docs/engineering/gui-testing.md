@@ -182,6 +182,22 @@ success as export, audio-quality or broad regression clearance.
 
 ## Opt-in audio and performance diagnostics
 
+`SwiftReviewRecoveryHostedTests/generatedSourceStopMeasuresNativeBarrierAndRetainsQuiescence()`
+with `WW_REVIEW_QOS_MEASUREMENT=1` measures five 26-source native Stops using
+generated PCM and verifies cleared transport state and stale-generation refusal.
+These timings characterize the identified guest, not physical audio hardware.
+Keep the synchronous native drain and heard-buffer completion policy intact.
+
+For priority-inversion warnings, export diagnostics from the `.xcresult` and
+inspect its unified-log archive, including `com.apple.runtime-issues` records.
+Performance Diagnostics can suppress console display; a console grep or the
+warning's test-file URL is not a causal backtrace. Resolve target image UUIDs
+and offsets against the exact app Products and matching guest system images.
+Preserve both raw records and Xcode's summarized warning records; their counts
+can differ. Measure the identified wait before changing ownership or QoS.
+Do not disable native text behavior, change heard-buffer semantics or raise
+every queue's priority merely to hide a warning inside a platform API.
+
 The short generated-media production regression is
 `SustainedProductionPlaybackHostedTests/adaptiveProductionSurvivesLiveInsertEditingSavingAndTranscriptLayout()`
 with `WW_PRODUCTION_TIMING_TESTS=1`. It exercises cold adaptive tiles, native

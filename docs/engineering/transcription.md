@@ -23,7 +23,9 @@ in-flight recipe.
 
 The app-wide `TranscriptionWorkerPool` admits 1-4 concurrent speaker lanes across
 windows, default one. Each admitted worker has its own native context;
-initialization serialization must not serialize inference. Queueing is FIFO
+currently each window initializes and disposes an independent context while
+the worker retains immutable verified model bytes.
+Initialization serialization must not serialize inference. Queueing is FIFO
 and cancellable, with permits released on every completion/failure/race.
 Versioned configuration prevents an older async Settings update from restoring
 an obsolete limit. Lowering a limit does not interrupt admitted lanes.
@@ -116,3 +118,36 @@ public-speech benchmarks require separate explicit opt-in and authorized local
 inputs. Generated tiny-native probes establish bridge mechanics, not speech
 accuracy or production qualification. Never commit model weights or interpret
 historical model/media permission as permission for a new run.
+
+### Independent-context lifecycle measurement
+
+With specific hardware/model-test authorization, the generated-speech lifecycle
+test admits existing pinned local models through `LocalWhisper.load` and uses
+the production resampling, configuration, inference and transcript conversion.
+Set `WW_WHISPER_LIFECYCLE_MODEL` to the existing model file,
+`WW_WHISPER_LIFECYCLE_BACKEND` to `cpu` or `metal`, and
+`WW_WHISPER_LIFECYCLE_CONTROL` to freshly generated mono 48 kHz speech containing
+"review", "meeting" and "notes". No model or voice download is implied.
+
+Run only
+`WWSpeechTests.LocalWhisperTests.optedInGeneratedSpeechMeasuresIndependentContextLifecycle`
+with `swift test --configuration release -Xswiftc -enable-testing -Xswiftc -DDEBUG`,
+the established package/scratch paths, bounded jobs and `--no-parallel`.
+The first of three calls is process-cold native setup; later calls are
+process-warm **new contexts**, not reused contexts or cold-storage measurements.
+Use fresh processes for repeated cold observations and record exact
+source/build/model/PCM hashes, configuration and hardware.
+
+Worker admission elapsed time (including task/actor scheduling, not just permit
+queueing), model read/hash admission, initialization-mutex wait, native
+context setup, inference and native context disposal are separate observations.
+Total window time additionally includes resampling, input validation, transcript
+conversion and transcript disposal. Optional native metrics change neither
+context ownership nor numerical settings. Actual backend abort evidence,
+disposal, successful inference after cancellation and released pool reservations
+are checked, alongside recognized control words and repeatable transcript/timing.
+Set `WW_WHISPER_LIFECYCLE_CONCURRENT=1` for two independent contexts with one
+CPU thread each; observed peak admission establishes worker overlap, while
+mutex waits record initialization contention separately. Task-creation order
+proves neither. A throughput opportunity does not authorize context
+sharing, vendor edits, a different recognizer recipe or media access.

@@ -1,8 +1,10 @@
 import AVFoundation
 import CryptoKit
 import Foundation
+import Synchronization
 import Testing
-import WWSpeech
+import WWWhisperNative
+@testable import WWSpeech
 
 @Suite("Pinned local Whisper", .serialized)
 struct LocalWhisperTests {
@@ -39,6 +41,23 @@ struct LocalWhisperTests {
         #expect(throws: SpeechModelError.invalidSize) {
             try LocalWhisper.load(path: url.path, weights: weights)
         }
+    }
+
+    @Test(arguments: [false, true])
+    func refusedNativeMeasurementsDoNotRetainPreviousLifecycleEvidence(canceled: Bool) {
+        var metrics = WWWhisperLifecycleMetrics(initialization_wait_seconds: 1, context_setup_seconds: 1,
+            inference_seconds: 1, context_disposal_seconds: 1, inference_aborted: 1)
+        var flag: Int32 = canceled ? 1 : 0
+        let native = withUnsafeMutablePointer(to: &flag) { pointer in
+            ww_whisper_infer_window_measured(nil, 0, nil, 0,
+                WWWhisperConfiguration(use_metal: 0, threads: 2), {
+                    $0?.assumingMemoryBound(to: Int32.self).pointee ?? 1
+                }, pointer, &metrics)
+        }
+        #expect(native.status == (canceled ? WW_INFERENCE_CANCELED : WW_INFERENCE_INVALID_INPUT))
+        #expect(metrics.initialization_wait_seconds == 0 && metrics.context_setup_seconds == 0
+                && metrics.inference_seconds == 0 && metrics.context_disposal_seconds == 0
+                && metrics.inference_aborted == 0)
     }
 
     @Test(.enabled(if: ProcessInfo.processInfo.environment["WW_WHISPER_QUALIFICATION_MODEL"] != nil))
@@ -83,6 +102,130 @@ struct LocalWhisperTests {
             print("WHISPER-MODEL-QUALIFICATION \(weights.rawValue) \(configuration.backend.rawValue): \(text); recipe=\(engine.revision)")
         }
         #expect(await pool.snapshot.reservedBytes == 0)
+    }
+
+    private final class CancellationPolls: Sendable {
+        let count = Mutex(0)
+        func cancelDuringInference() -> Bool {
+            count.withLock { value in
+                value += 1
+                return value >= 6
+            }
+        }
+    }
+
+    private struct LifecycleSample: Sendable {
+        let transcript: PCMTranscript
+        let total: Double
+        let wait: Double
+        let setup: Double
+        let inference: Double
+        let disposal: Double
+    }
+
+    private static func seconds(_ duration: Duration) -> Double {
+        let components = duration.components
+        return Double(components.seconds) + Double(components.attoseconds) / 1e18
+    }
+
+    @concurrent
+    private func measure(_ engine: LocalWhisper, pcm: [Float]) async throws -> LifecycleSample {
+        var metrics = WWWhisperLifecycleMetrics()
+        let start = ContinuousClock.now
+        let transcript = try withUnsafeMutablePointer(to: &metrics) {
+            try engine.transcribe(pcm: pcm, sampleRate: 48_000,
+                                  isCanceled: { Task<Never, Never>.isCancelled }, nativeMetrics: $0)
+        }
+        return LifecycleSample(transcript: transcript, total: Self.seconds(start.duration(to: .now)),
+            wait: metrics.initialization_wait_seconds, setup: metrics.context_setup_seconds,
+            inference: metrics.inference_seconds, disposal: metrics.context_disposal_seconds)
+    }
+
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["WW_WHISPER_LIFECYCLE_MODEL"] != nil),
+          .timeLimit(.minutes(3)))
+    func optedInGeneratedSpeechMeasuresIndependentContextLifecycle() async throws {
+        let env = ProcessInfo.processInfo.environment
+        let path = try #require(env["WW_WHISPER_LIFECYCLE_MODEL"])
+        let weights = try #require(LocalWhisperWeights.allCases.first {
+            $0.filename == URL(fileURLWithPath: path).lastPathComponent
+        })
+        let backend = try #require(env["WW_WHISPER_LIFECYCLE_BACKEND"].flatMap(TranscriptionBackend.init(rawValue:)))
+        let configuration = try TranscriptionConfiguration.resolve(backend: backend, threads: .two)
+        let audio = try AVAudioFile(forReading: URL(fileURLWithPath: #require(env["WW_WHISPER_LIFECYCLE_CONTROL"])))
+        try #require(audio.processingFormat.channelCount == 1 && audio.processingFormat.sampleRate == 48_000)
+        try #require(audio.length > 4_800 && audio.length <= 30 * 48_000)
+        let buffer = try #require(AVAudioPCMBuffer(pcmFormat: audio.processingFormat,
+            frameCapacity: AVAudioFrameCount(audio.length)))
+        try audio.read(into: buffer)
+        let channel = try #require(buffer.floatChannelData?[0])
+        let pcm = Array(UnsafeBufferPointer(start: channel, count: Int(buffer.frameLength)))
+        let pcmHash = pcm.withUnsafeBytes { SHA256.hash(data: Data($0)).map { String(format: "%02x", $0) }.joined() }
+        let pool = TranscriptionWorkerPool()
+        let workerStart = ContinuousClock.now
+        try await pool.withAdmission(resources: TranscriptionResources(weights: weights, configuration: configuration)) {
+            print("WHISPER-LIFECYCLE worker_admission_elapsed seconds=\(Self.seconds(workerStart.duration(to: .now)))")
+            let admissionStart = ContinuousClock.now
+            let engine = try await LocalWhisper.load(url: URL(fileURLWithPath: path),
+                                                    weights: weights, configuration: configuration)
+            print("WHISPER-LIFECYCLE model_admission model=\(weights.rawValue) backend=\(backend.rawValue) seconds=\(Self.seconds(admissionStart.duration(to: .now))) pcmSHA256=\(pcmHash) frames=\(pcm.count) revision=\(engine.revision)")
+            var reference: PCMTranscript?
+            for repetition in 0..<3 {
+                let sample = try await measure(engine, pcm: pcm)
+                let text = sample.transcript.segments.map(\.text).joined(separator: " ").lowercased()
+                #expect(text.contains("review") && text.contains("meeting") && text.contains("notes"))
+                #expect(sample.setup > 0 && sample.inference > 0 && sample.disposal > 0 && sample.wait >= 0)
+                #expect(sample.total >= sample.wait + sample.setup + sample.inference + sample.disposal)
+                for segment in sample.transcript.segments {
+                    if let start = segment.startSeconds, let end = segment.endSeconds {
+                        #expect(start >= 0 && end > start && end <= Double(pcm.count) / 48_000)
+                    }
+                }
+                if let reference { #expect(sample.transcript == reference) }
+                reference = sample.transcript
+                print("WHISPER-LIFECYCLE context repetition=\(repetition) total=\(sample.total) wait=\(sample.wait) setup=\(sample.setup) inference=\(sample.inference) disposal=\(sample.disposal) text=\(text)")
+            }
+            let unmeasured = try await engine.transcribeWindow(pcm: pcm, sampleRate: 48_000)
+            #expect(unmeasured == reference)
+            let polls = CancellationPolls()
+            var canceledMetrics = WWWhisperLifecycleMetrics()
+            #expect(throws: PCMInferenceRefusal.canceled) {
+                try withUnsafeMutablePointer(to: &canceledMetrics) {
+                    try engine.transcribe(pcm: pcm, sampleRate: 48_000,
+                        isCanceled: { polls.cancelDuringInference() }, nativeMetrics: $0)
+                }
+            }
+            #expect(canceledMetrics.inference_aborted == 1 && canceledMetrics.inference_seconds > 0
+                    && canceledMetrics.context_disposal_seconds > 0)
+            print("WHISPER-LIFECYCLE canceled setup=\(canceledMetrics.context_setup_seconds) inference=\(canceledMetrics.inference_seconds) disposal=\(canceledMetrics.context_disposal_seconds)")
+            let afterCancellation = try await engine.transcribeWindow(pcm: pcm, sampleRate: 48_000)
+            #expect(afterCancellation == reference)
+        }
+        let released = await pool.snapshot
+        #expect(released.active == 0 && released.waiting == 0 && released.reservedBytes == 0
+                && released.activeCPUThreads == 0 && released.activeMetalWorkers == 0)
+        if env["WW_WHISPER_LIFECYCLE_CONCURRENT"] == "1" {
+            let pairConfiguration = try TranscriptionConfiguration.resolve(backend: backend, threads: .one)
+            let pairPool = TranscriptionWorkerPool(concurrency: .two)
+            let resources = try TranscriptionResources(weights: weights, configuration: pairConfiguration)
+            async let left = pairPool.withAdmission(resources: resources) {
+                let engine = try await LocalWhisper.load(url: URL(fileURLWithPath: path),
+                    weights: weights, configuration: pairConfiguration)
+                return try await measure(engine, pcm: pcm)
+            }
+            async let right = pairPool.withAdmission(resources: resources) {
+                let engine = try await LocalWhisper.load(url: URL(fileURLWithPath: path),
+                    weights: weights, configuration: pairConfiguration)
+                return try await measure(engine, pcm: pcm)
+            }
+            let pair = try await (left, right)
+            #expect(pair.0.transcript == pair.1.transcript)
+            for (index, sample) in [pair.0, pair.1].enumerated() {
+                print("WHISPER-LIFECYCLE pair index=\(index) total=\(sample.total) wait=\(sample.wait) setup=\(sample.setup) inference=\(sample.inference) disposal=\(sample.disposal)")
+            }
+            let snapshot = await pairPool.snapshot
+            #expect(snapshot.peakActive == 2 && snapshot.active == 0 && snapshot.reservedBytes == 0
+                    && snapshot.activeCPUThreads == 0 && snapshot.activeMetalWorkers == 0)
+        }
     }
 
     @Test(.enabled(if: ProcessInfo.processInfo.environment["WW_LOCAL_ASR_MODEL"] != nil

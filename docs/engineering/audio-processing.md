@@ -154,6 +154,9 @@ AVFAudio engine lock. Extrapolation is clamped to scheduled samples. The
 one-shot watchdog targets low-water/end boundaries with a 50 ms maximum
 snapshot interval and shorter terminal/startup retries; refill/starvation
 decisions still use a fresh device observation.
+On exhaustion, publish the retained terminal clock and explicit failure before
+dispatching the main-actor deadline callback. Native Stop has already drained
+the players; the callback can preserve that playhead before clearing the session.
 Source-meter reads use the same immutable snapshot. The existing output-queue
 watchdog publishes heard-frame meter state; gain/exclusion/reset/Stop mutations
 publish in queue order. Meter computation stays queue-owned, while UI polling no

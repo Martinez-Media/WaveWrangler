@@ -542,6 +542,8 @@ private final class AlignmentAudioPlaybackGraph: @unchecked Sendable {
         stop(refillFailure: AlignmentTransportFailure.bufferDeadline)
         clock = stopped
         failure = .bufferDeadline
+        // The callback can run before this queue turn's deferred publication.
+        publishSnapshot()
         let stoppedGeneration = generation
         if let callback {
             Task { @MainActor [weak self] in

@@ -79,7 +79,11 @@ struct AlignmentListeningStartupHostedTests {
             channels: Array(repeating: Array(repeating: Float(0), count: count), count: 2))
         try playback.enqueueProduction(output, final: false) {
             failures += 1
-            #expect(playback.clock != nil)
+            let snapshot = playback.snapshot
+            let terminal = snapshot.clock?.playhead()
+            let failure = snapshot.failure
+            #expect(terminal == Double(count) / Double(MixerRecipe.sampleRate))
+            #expect(failure == .bufferDeadline)
         }
         try await wait("A real production underrun must still stop playback") { failures == 1 }
         #expect(playback.clock == nil)
@@ -245,7 +249,11 @@ struct AlignmentListeningStartupHostedTests {
             onSourcesJoined: {}
         ) {
             failures += 1
-            #expect(playback.clock != nil, "The caller must be able to preserve the final shared playhead.")
+            let snapshot = playback.snapshot
+            let terminal = snapshot.clock?.playhead()
+            let failure = snapshot.failure
+            #expect(terminal == 0.3, "The caller must be able to preserve the final shared playhead.")
+            #expect(failure == .bufferDeadline)
             playback.stop()
         }
         try await wait("The missed producer deadline did not report") { failures == 1 }

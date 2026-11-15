@@ -72,6 +72,35 @@ struct SwiftReviewRecoveryHostedTests {
         #expect(output.sourceMeters.levels.isEmpty)
     }
 
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["WW_REVIEW_QOS_MEASUREMENT"] == "1"))
+    func generatedSourceStopMeasuresNativeBarrierAndRetainsQuiescence() async throws {
+        let sources = (0..<26).map { _ in SourceID() }
+        let clips = Dictionary(uniqueKeysWithValues: sources.map {
+            ($0, AlignmentAudioClip(sampleRate: 48_000, samples: Array(repeating: 0.01, count: 96_000)))
+        })
+        for repetition in 0..<5 {
+            let output = AlignmentAudioPlayback()
+            defer { output.stop() }
+            try output.enqueue(clips, startSeconds: 0, first: true, availableSources: Set(sources),
+                final: true, onSourcesJoined: {}, onBufferDeadline: {
+                    Issue.record("Final generated source playback unexpectedly starved")
+                })
+            try await wait { (output.clock?.playhead() ?? 0) >= 0.1 }
+            let oldGeneration = output.generation
+            let start = ContinuousClock.now
+            output.stop()
+            let duration = start.duration(to: .now).components
+            let elapsed = Double(duration.seconds) + Double(duration.attoseconds) / 1e18
+            let stoppedGeneration = output.generation
+            let stopped = output.snapshot
+            #expect(stoppedGeneration != oldGeneration && stopped.clock == nil && stopped.sourceMeters.levels.isEmpty)
+            #expect(output.preparedSources.isEmpty && output.pendingSources.isEmpty)
+            output.stop(ifCurrent: oldGeneration)
+            #expect(output.generation == stoppedGeneration)
+            print("QOS-NATIVE-STOP sources=26 repetition=\(repetition) seconds=\(elapsed)")
+        }
+    }
+
     @Test(.enabled(if: ProcessInfo.processInfo.environment["WW_REVIEW_PRESENTATION_MEASUREMENT"] == "1"))
     func generatedWaveformGroupingMeasurement() async throws {
         let f = try await AlignmentWaveformRetentionHostedTests().fixture(durationSeconds: 1, extraSources: 24)

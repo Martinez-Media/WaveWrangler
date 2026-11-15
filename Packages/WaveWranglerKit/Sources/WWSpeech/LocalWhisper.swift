@@ -115,6 +115,14 @@ public struct LocalWhisper: Sendable {
         pcm: [Float], sampleRate: Int,
         isCanceled: @escaping @Sendable () -> Bool = { Task<Never, Never>.isCancelled }
     ) throws -> PCMTranscript {
+        try transcribe(pcm: pcm, sampleRate: sampleRate, isCanceled: isCanceled, nativeMetrics: nil)
+    }
+
+    func transcribe(
+        pcm: [Float], sampleRate: Int, isCanceled: @escaping @Sendable () -> Bool,
+        nativeMetrics: UnsafeMutablePointer<WWWhisperLifecycleMetrics>?
+    ) throws -> PCMTranscript {
+        nativeMetrics?.pointee = WWWhisperLifecycleMetrics()
         guard (8000...192000).contains(sampleRate), pcm.count >= sampleRate / 10,
               pcm.count <= sampleRate * 30, pcm.allSatisfy({ $0.isFinite && abs($0) <= 8 })
         else { throw PCMInferenceRefusal.invalidPCM }
@@ -134,10 +142,10 @@ public struct LocalWhisper: Sendable {
         }
         var native = bytes.withUnsafeBytes { model in
             samples.withUnsafeBufferPointer { audio in
-                ww_whisper_infer_window_configured(UnsafeMutableRawPointer(mutating: model.baseAddress), model.count,
+                ww_whisper_infer_window_measured(UnsafeMutableRawPointer(mutating: model.baseAddress), model.count,
                     audio.baseAddress, Int32(audio.count),
                     WWWhisperConfiguration(use_metal: configuration.backend == .metal ? 1 : 0,
-                                           threads: Int32(configuration.threads.rawValue)), callback, raw)
+                                           threads: Int32(configuration.threads.rawValue)), callback, raw, nativeMetrics)
             }
         }
         defer { ww_whisper_free_transcript(&native) }
