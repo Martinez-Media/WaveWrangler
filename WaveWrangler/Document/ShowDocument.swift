@@ -607,9 +607,34 @@ final class ShowDocument: NSDocument {
         let adopts = Self.adoptsPublication(saveOperation)
         if adopts { status.set(.saving) }
         let restoredAtSaveStart = restoredOfferURLs
+        let nativeDate: (prior: Date?, observed: Date)?
+        do {
+            if Self.autosavesInPlace, case .inPlace = snapshot.target,
+               nativeSaveBaseURL == url.standardizedFileURL {
+                let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+                guard let observed = attributes[.modificationDate] as? Date else {
+                    throw CocoaError(.fileReadUnknown)
+                }
+                // This is AppKit's versioning preflight, not publication authority. The captured
+                // expected base is still checked against fresh bytes before any write.
+                nativeDate = (fileModificationDate, observed)
+                fileModificationDate = observed
+            } else {
+                nativeDate = nil
+            }
+        } catch {
+            finishSave(saveOperation: saveOperation, adopts: adopts, error: error, snapshot: snapshot,
+                       candidateRevision: candidateRevision, restoredAtSaveStart: restoredAtSaveStart)
+            completionHandler(error)
+            return
+        }
         super.save(to: url, ofType: typeName, for: saveOperation) { [weak self] error in
             guard let self else { return completionHandler(error) }
             let finish = {
+                if error != nil, let nativeDate, self.fileURL?.standardizedFileURL == url.standardizedFileURL,
+                   self.fileModificationDate == nativeDate.observed {
+                    self.fileModificationDate = nativeDate.prior
+                }
                 self.finishSave(saveOperation: saveOperation, adopts: adopts, error: error, snapshot: snapshot,
                                 candidateRevision: candidateRevision, restoredAtSaveStart: restoredAtSaveStart)
                 completionHandler(error)

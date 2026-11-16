@@ -37,12 +37,17 @@ struct LazyCatalogHostedTests {
         return document
     }
 
-    private func save(_ document: ShowDocument) async throws {
+    private func save(_ document: ShowDocument, automatic: Bool = false) async throws {
         let url = try #require(document.fileURL)
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            document.save(to: url, ofType: DocumentTypes.show, for: .saveOperation) { error in
+            let completion: (Error?) -> Void = { error in
                 if let error { continuation.resume(throwing: error) }
                 else { continuation.resume() }
+            }
+            if automatic {
+                document.autosave(withImplicitCancellability: false, completionHandler: completion)
+            } else {
+                document.save(to: url, ofType: DocumentTypes.show, for: .saveOperation, completionHandler: completion)
             }
         }
     }
@@ -110,39 +115,50 @@ struct LazyCatalogHostedTests {
         }
     }
 
-    @Test func externallyChangedPackageIsNeverOverwrittenByRetry() async throws {
+    @Test(arguments: [false, true])
+    func externallyChangedPackageIsNeverOverwrittenByRetry(automatic: Bool) async throws {
+        let preference = PersistenceEnvironment.autosaveGate.preference
+        PersistenceEnvironment.autosaveGate.preference = AutosavePreference(enabled: automatic, delaySeconds: 30)
+        defer { PersistenceEnvironment.autosaveGate.preference = preference }
         let (document, root, original) = try fixture(nativeOpen: true)
         defer { do { try finish(document, root: root) } catch { Issue.record(error) } }
         let url = try #require(document.fileURL)
         try #require(document.store.apply("Rename Show") { model throws(DomainError) in
             try model.renamingShow(to: "Unsaved local draft")
         })
+        if automatic { try await wait { document.hasUnautosavedChanges } }
         let competing = try ShowCatalog(original.renamingShow(to: "External writer"))
         let bytes = try ShowCatalogCoder().encode(competing, revision: 2)
         let staged = root.appending(path: "External.wwshow")
         try LocalFileOperations().writeNew(bytes, to: staged)
         try LocalFileOperations().replace(url, withStaged: staged)
-        do {
-            try await save(document)
-            Issue.record("An externally changed publication must be refused.")
-        } catch {
-            #expect((error as NSError).code != NSUserCancelledError)
-            let details = try #require(document.saveFailureDetails)
-            #expect(details.contains((error as NSError).domain))
-            if let failure = error as? PublicationError {
-                #expect(details.contains(String(describing: failure)))
+        for attempt in 1...2 {
+            do {
+                try await save(document, automatic: automatic)
+                Issue.record("An externally changed publication must be refused on attempt \(attempt).")
+            } catch {
+                #expect((error as NSError).code != NSUserCancelledError)
+                let details = try #require(document.saveFailureDetails)
+                #expect(details.contains("Expected r"))
+                #expect(details.contains((error as NSError).domain))
+                if let failure = error as? PublicationError {
+                    #expect(details.contains(String(describing: failure)))
+                }
             }
+            #expect(try LocalFileOperations().read(url) == bytes)
         }
-        #expect(try LocalFileOperations().read(url) == bytes)
         let draftTitle = document.store.header.show.title
         let edited = document.isDocumentEdited
+        let verifiedTitle = document.verifiedCatalog?.header.show.title
         #expect(draftTitle == "Unsaved local draft")
         #expect(edited)
+        #expect(verifiedTitle == original.show.title)
     }
 
-    @Test func nativeSavePersistsSpeakerPhotosAfterMetadataOnlyChanges() async throws {
+    @Test(arguments: [false, true])
+    func nativeSavePersistsSpeakerPhotosAfterMetadataOnlyChanges(automatic: Bool) async throws {
         let preference = PersistenceEnvironment.autosaveGate.preference
-        PersistenceEnvironment.autosaveGate.preference = AutosavePreference(enabled: false, delaySeconds: 30)
+        PersistenceEnvironment.autosaveGate.preference = AutosavePreference(enabled: automatic, delaySeconds: 30)
         defer { PersistenceEnvironment.autosaveGate.preference = preference }
         let speaker = Speaker(name: "Synthetic speaker")
         let (document, root, _) = try fixture(nativeOpen: true, speakers: [speaker])
@@ -166,15 +182,22 @@ struct LazyCatalogHostedTests {
                 try model.settingSpeakerAppearance(.init(color: .teal, avatarPNG: png), for: speaker.id)
             }
             try #require(applied)
+            if automatic {
+                try await wait { document.hasUnautosavedChanges }
+            }
             let prior = try LocalFileOperations().read(url)
             try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(120)],
                                                   ofItemAtPath: url.path)
             #expect(try LocalFileOperations().read(url) == prior)
-            let reply = SaveReply()
-            document.save(withDelegate: reply, didSave: #selector(SaveReply.document(_:didSave:contextInfo:)),
-                          contextInfo: nil)
-            try await wait { reply.saved != nil }
-            #expect(reply.saved == true)
+            if automatic {
+                try await save(document, automatic: true)
+            } else {
+                let reply = SaveReply()
+                document.save(withDelegate: reply, didSave: #selector(SaveReply.document(_:didSave:contextInfo:)),
+                              contextInfo: nil)
+                try await wait { reply.saved != nil }
+                #expect(reply.saved == true)
+            }
             let saved = try ShowCatalogCoder().decode(LocalFileOperations().read(url)).payload
             let savedPNG = saved.header.speakers.first?.appearance?.avatarPNG
             let episodesUnchanged = saved.episodes == episodes
@@ -190,6 +213,42 @@ struct LazyCatalogHostedTests {
         @objc func document(_ document: NSDocument, didSave saved: Bool, contextInfo: UnsafeMutableRawPointer?) {
             self.saved = saved
         }
+    }
+
+    @Test func writerChangingPackageAfterNativeMetadataRefreshIsRefused() async throws {
+        let preference = PersistenceEnvironment.autosaveGate.preference
+        PersistenceEnvironment.autosaveGate.preference = AutosavePreference(enabled: true, delaySeconds: 30)
+        defer { PersistenceEnvironment.autosaveGate.preference = preference }
+        let (document, root, original) = try fixture(nativeOpen: true)
+        defer { do { try finish(document, root: root) } catch { Issue.record(error) } }
+        let url = try #require(document.fileURL)
+        try #require(document.store.apply("Rename Show") { model throws(DomainError) in
+            try model.renamingShow(to: "Keep my pending draft")
+        })
+        try await wait { document.hasUnautosavedChanges }
+        let bytes = try ShowCatalogCoder().encode(ShowCatalog(original.renamingShow(to: "Late writer")), revision: 2)
+        let staged = root.appending(path: "Late writer.wwshow")
+        try LocalFileOperations().writeNew(bytes, to: staged)
+        let hookError = Mutex<(any Error)?>(nil)
+        let previousHook = ShowDocument.debugBeforeSaveEncoding
+        ShowDocument.debugBeforeSaveEncoding = {
+            do { try LocalFileOperations().replace(url, withStaged: staged) }
+            catch { hookError.withLock { $0 = error } }
+        }
+        defer { ShowDocument.debugBeforeSaveEncoding = previousHook }
+        do {
+            try await save(document, automatic: true)
+            Issue.record("A writer arriving after the native metadata refresh must still be refused.")
+        } catch {
+            #expect(try #require(document.saveFailureDetails).contains("Expected r"))
+        }
+        let injectionError = hookError.withLock { $0 }
+        #expect(injectionError == nil)
+        #expect(try LocalFileOperations().read(url) == bytes)
+        let draftTitle = document.store.header.show.title
+        let edited = document.isDocumentEdited
+        #expect(draftTitle == "Keep my pending draft")
+        #expect(edited)
     }
 
     @Test func sharedWindowPinsAndArchivedUndoDoNotRetainVisitedPayloads() async throws {

@@ -145,10 +145,58 @@ final class CoreTasksKeyboardUITests: XCTestCase {
         }
     }
 
+    func testAutomaticSaveAfterMetadataOnlyPackageChanges() throws {
+        let document = try makeDocument("Automatic Metadata Save")
+        try task("automatic-save-metadata") {
+            let window = try launchAndOpen(document, autosave: true,
+                extraArguments: ["-WWUITestAutosaveDelaySeconds", "2"])
+            window.typeKey("i", modifierFlags: .command)
+            let title = element("ww.inspector.episode.title")
+            XCTAssertTrue(title.waitForExistence(timeout: 5))
+            for index in 0..<3 {
+                let expected = "Automatically saved metadata edit \(index)"
+                let prior = try ShowStorage.read(document)
+                if index == 1 {
+                    let replacement = workDirectory.appending(path: "Identical automatic replacement.wwshow")
+                    try FileManager.default.copyItem(at: document, to: replacement)
+                    _ = try FileManager.default.replaceItemAt(document, withItemAt: replacement)
+                }
+                try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(120)],
+                                                      ofItemAtPath: document.path)
+                XCTAssertEqual(try ShowStorage.read(document), prior)
+                title.click()
+                title.typeKey("a", modifierFlags: .command)
+                title.typeText(expected)
+                title.typeKey("\t", modifierFlags: [])
+                if index == 2 { app.typeKey("s", modifierFlags: .command) }
+                let saved = Acceptance.waitFor(timeout: 12) { self.diskEpisode(document)?.title == expected }
+                Acceptance.record(self, "Automatic save \(index): \(nativeSheetDescription())")
+                XCTAssertTrue(saved, "Autosave ON must save metadata-only changes without an overwrite prompt")
+                guard saved else { return }
+                XCTAssertFalse(app.sheets.firstMatch.exists)
+                XCTAssertTrue(Acceptance.waitFor(timeout: 5) {
+                    self.value(self.element("ww.show.saveStatus")).hasPrefix("Saved")
+                }, "automatic publication is verified before reporting Saved")
+            }
+            app.typeKey("w", modifierFlags: [.command, .shift])
+            XCTAssertTrue(Acceptance.waitFor(timeout: 10) { !window.exists })
+            XCTAssertFalse(app.sheets.firstMatch.exists, "a verified autosaved show closes without an overwrite prompt")
+        }
+    }
+
     func testNativeSaveDoesNotRecreateADeletedPackage() throws {
+        try checkDeletedPackageSave(automatic: false)
+    }
+
+    func testNativeSaveDoesNotRecreateADeletedPackageWithAutosaveEnabled() throws {
+        try checkDeletedPackageSave(automatic: true)
+    }
+
+    private func checkDeletedPackageSave(automatic: Bool) throws {
         let document = try makeDocument("Deleted Native Save")
         try task("native-save-deleted") {
-            let window = try launchAndOpen(document, autosave: false)
+            let window = try launchAndOpen(document, autosave: automatic,
+                extraArguments: ["-WWUITestAutosaveDelaySeconds", "30"])
             try editShowTitle(window, "Keep my deleted-file draft")
             try FileManager.default.removeItem(at: document)
             app.typeKey("s", modifierFlags: .command)
@@ -157,7 +205,7 @@ final class CoreTasksKeyboardUITests: XCTestCase {
             if sheet.buttons["Save"].exists { sheet.buttons["Save"].click() }
             Acceptance.record(self, "Deleted destination refusal: \(nativeSheetDescription())")
             let conflict = app.sheets.staticTexts.matching(NSPredicate(
-                format: "label CONTAINS[c] 'could not be saved' OR value CONTAINS[c] 'could not be saved'")).firstMatch
+                format: "label CONTAINS[c] 'could not be saved' OR value CONTAINS[c] 'could not be saved' OR label CONTAINS[c] 'no such file' OR value CONTAINS[c] 'no such file'")).firstMatch
             XCTAssertTrue(conflict.waitForExistence(timeout: 10), "missing saved bytes cannot be silently replaced")
             XCTAssertFalse(app.sheets.buttons["Save"].exists, "a missing base has no force-overwrite choice")
             XCTAssertFalse(FileManager.default.fileExists(atPath: document.path))

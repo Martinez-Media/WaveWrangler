@@ -162,12 +162,23 @@ delegate, then uses the existing capture barrier and verified publisher.
 The publisher's coordinated exact-byte check replaces the higher-level
 timestamp/delete preflight: provider metadata touches and identical-byte
 replacements are not conflicts; different or missing destination bytes are
-refused, with the candidate retained and the draft still dirty. Presenter moves,
+refused, with the draft still dirty; conflicts detected by the publisher also
+retain the encoded candidate. Presenter moves,
 including moves into the Trash, retain the stock native entry when the URL
 changes; relocation never changes the expected saved bytes. Untitled, locked,
 viewing-mode and baseless documents also retain the stock native entry.
-No modification-date reset, overwrite override or extra main-thread package
-read is used.
+With autosave in place enabled, AppKit also performs a native versioning
+preflight inside the URL save. Immediately before that entry, an in-place save
+at the same verified URL refreshes `fileModificationDate` from filesystem
+metadata, never from the wall clock. This native heuristic is not publication
+authority: it does not change the captured expected fingerprint, adopt bytes or
+mark the document Saved. Metadata lookup failures are reported through the
+ordinary failed-save path. On failure, the prior native date is restored only
+if the document still has that URL and the date still matches this attempt.
+Save As, relocation and autosave-off behavior do not use this refresh.
+Native version preservation and the synchronous pre-captured autosave entry
+remain intact. No overwrite override or extra main-thread package-content read
+is used.
 
 The document retains its latest save failure for the save-status **Details**
 action, including typed publication diagnostics and a bounded NSError cause
