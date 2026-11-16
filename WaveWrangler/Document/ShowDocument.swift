@@ -368,9 +368,31 @@ final class ShowDocument: NSDocument {
     }
 
     private func load(_ data: Data, url: URL?) throws {
+        _ = try ShowPackage.storageVersion(of: data)
+        if RevisionFingerprint(of: data).schemaVersion == 14 {
+            let decoded: DecodedDocument<ShowDocumentModel>
+            do { decoded = try ShowCatalogMigration.preview(data) }
+            catch let error as PersistenceError {
+                if case .unknownNewerSchema = error { throw error }
+                let opener = DocumentOpener(coder: ShowPackageCoder(), coordination: AlreadyCoordinated(), recovery: recovery,
+                    recoveryDecode: ShowCatalogMigration.preview)
+                throw DocumentRecoveryOffer.error(for: error, candidates: opener.candidates(url: url, key: nil))
+            }
+            store.replaceLoadedModel(decoded.payload)
+            verifiedModel = decoded.payload
+            publication = decoded.publication
+            onDiskBase = RevisionFingerprint(of: data)
+            status.set(.clean(revision: decoded.revision))
+            formatUpdateOriginal = data
+            formatUpdatePromptPending = true
+            status.setFormatUpdate(.needed)
+            scheduleAfterFirstFrame()
+            return
+        }
         if try ShowPackage.storageVersion(of: data) == 2 {
             let opener = DocumentOpener(coder: coder, coordination: AlreadyCoordinated(), recovery: recovery,
-                                        identityOf: { .show($0.header.show.id) })
+                                        identityOf: { .show($0.header.show.id) },
+                                        recoveryDecode: ShowCatalogMigration.recoveryCatalog)
             switch opener.outcome(for: data, url: url) {
             case let .editable(document, fingerprint):
                 formatUpdateOriginal = nil
@@ -393,7 +415,8 @@ final class ShowDocument: NSDocument {
             }
         }
         // Version-1 packages remain read-only until the user consents to indexed storage.
-        let opener = DocumentOpener(coder: ShowPackageCoder(), coordination: AlreadyCoordinated(), recovery: recovery)
+        let opener = DocumentOpener(coder: ShowPackageCoder(), coordination: AlreadyCoordinated(), recovery: recovery,
+            recoveryDecode: ShowCatalogMigration.preview)
         let outcome = OpenSignposts.measure("document.decode") { opener.outcome(for: data, url: url) }
         switch outcome {
         case let .editable(document, fingerprint):

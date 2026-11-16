@@ -96,6 +96,25 @@ retains existing cuts/range.
 
 Automatic filler suggestions never cut audio. Review/manual actions validate
 captured word/source/timing and use named canonical Undo operations.
+`FillerWords` is a canonical, bounded whole-word vocabulary: at most 128 unique
+words, each at most 64 UTF-8 bytes. Matching ignores case and surrounding
+punctuation; phrases are not supported. The default list is `er`, `erm`, `uh`,
+`um`. Effective rules resolve speaker override, show override, then device-local
+app defaults. Overrides replace inherited lists; an empty list disables
+automatic suggestions. Invalid stored defaults surface an error rather than
+silently substituting another vocabulary.
+
+Word settings use named document Undo operations without opening audio,
+running inference, or altering transcripts/reviews/cuts. Explicit **Find Filler
+Candidates** refreshes only unjudged, non-cut-linked pending detections whose
+captured vocabulary differs, preserving manual, adjusted, reviewed, rejected
+and cut-linked intervals. Identical rescans preserve review identities.
+New `configured-whole-words/2` detections capture their exact vocabulary;
+legacy `exact-hesitations/1:um,uh,erm,er` provenance remains valid.
+Transcription captures effective words at job start and refuses publication
+after relevant show/speaker override changes; app default edits apply to the
+next job. Raw recognition and existing editorial cuts are not rewritten.
+
 Common cuts affect all aligned dialogue; speaker mutes affect only the selected
 speaker and preserve time. Timing replacement retires incompatible active
 reviews/cuts/range rather than silently rebasing them.

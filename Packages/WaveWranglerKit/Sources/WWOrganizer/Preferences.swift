@@ -25,6 +25,7 @@ public enum PreferenceKey {
     public static let cutJumpBackSeconds = "WWCutJumpBackSeconds"
     public static let autoInputGainTargetDBFS = "WWAutoInputGainTargetDBFS"
     public static let workspacesInSeparateWindows = "WWWorkspacesInSeparateWindows"
+    public static let fillerWords = "WWFillerWords"
 }
 
 /// Typed accessor over a `UserDefaults` store with the product defaults applied.
@@ -51,6 +52,19 @@ public struct AppPreferences {
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+    }
+
+    public func fillerWords() throws -> FillerWords {
+        guard let stored = defaults.object(forKey: PreferenceKey.fillerWords) else { return .defaults }
+        guard let words = stored as? [String] else { throw DomainError.invalidFillerWords }
+        let value = try FillerWords(words)
+        guard value.words == words else { throw DomainError.invalidFillerWords }
+        return value
+    }
+
+    public func setFillerWords(_ value: FillerWords) throws(DomainError) {
+        guard value.isValid else { throw .invalidFillerWords }
+        defaults.set(value.words, forKey: PreferenceKey.fillerWords)
     }
 
     public var autosaveEnabled: Bool {

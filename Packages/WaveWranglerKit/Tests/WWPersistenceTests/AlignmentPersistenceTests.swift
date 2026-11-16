@@ -89,7 +89,7 @@ struct AlignmentPersistenceTests {
     /// A time-map schema bump requires a show schema bump, an explicit package migration and
     /// independent previous-version fixtures. Update both pins together, never one alone.
     @Test func schemaVersionsArePinned() {
-        #expect(SchemaVersion.show == 14, "a show schema bump needs a C5 step and frozen goldens of the previous schema")
+        #expect(SchemaVersion.show == 15, "a show schema bump needs a C5 step and frozen goldens of the previous schema")
         #expect(TimeMapSchema.currentVersion == 1, "a time-map schema bump requires a show schema bump (see this test's doc comment)")
     }
 

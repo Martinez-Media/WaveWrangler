@@ -6,6 +6,21 @@ import WWCore
 
 @Suite("Preferences and text size")
 struct PreferencesTests {
+    @Test func fillerDefaultsPersistExplicitEmptyAndRefuseCorruption() throws {
+        let defaults = freshDefaults()
+        let preferences = AppPreferences(defaults: defaults)
+        #expect(try preferences.fillerWords() == .defaults)
+        let words = try FillerWords(["like", "um"])
+        try preferences.setFillerWords(words)
+        #expect(try AppPreferences(defaults: defaults).fillerWords() == words)
+        try preferences.setFillerWords(FillerWords([]))
+        #expect(try preferences.fillerWords().words.isEmpty)
+        defaults.set(["not a word"], forKey: PreferenceKey.fillerWords)
+        #expect(throws: DomainError.invalidFillerWords) { try preferences.fillerWords() }
+        defaults.set("garbage", forKey: PreferenceKey.fillerWords)
+        #expect(throws: DomainError.invalidFillerWords) { try preferences.fillerWords() }
+    }
+
     private func freshDefaults() -> UserDefaults {
         let name = "ww-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: name)!

@@ -67,7 +67,7 @@ public enum ShowPackage {
         guard header.modelSchemaVersion <= SchemaVersion.show else {
             throw PersistenceError.unknownNewerSchema(found: header.modelSchemaVersion, supported: SchemaVersion.show)
         }
-        guard (1...version).contains(header.schemaVersion), header.modelSchemaVersion == SchemaVersion.show else {
+        guard (1...version).contains(header.schemaVersion), (14...SchemaVersion.show).contains(header.modelSchemaVersion) else {
             throw PersistenceError.malformed("Unsupported package version")
         }
     }
@@ -135,12 +135,12 @@ public enum ShowPackage {
         return Component(digest: digest, byteCount: data.count, encoding: encoding)
     }
 
-    static func decode(_ data: Data) throws -> DecodedDocument<ShowDocumentModel> {
+    static func decode(_ data: Data, allowingPreviousModel: Bool = false) throws -> DecodedDocument<ShowDocumentModel> {
         guard isSnapshot(data) else {
             throw PersistenceError.malformed("Expected a show package; pre-container shows are no longer supported")
         }
         if try storageVersion(of: data) == 2 {
-            let document = try ShowCatalogCoder().decode(data)
+            let document = try ShowCatalogCoder(allowingPreviousModel: allowingPreviousModel).decode(data)
             return DecodedDocument(payload: try document.payload.materializedModel(), publication: document.publication)
         }
         let snapshot = try unframe(data)
@@ -148,6 +148,9 @@ public enum ShowPackage {
         let decoder = JSONEnvelopeCoder<ShowDocumentModel>.makeDecoder()
         let manifest = try decoder.decode(Manifest.self, from: snapshot.manifest)
         try requireRecognized(snapshot.manifest, value: manifest)
+        guard allowingPreviousModel || manifest.modelSchemaVersion == SchemaVersion.show else {
+            throw PersistenceError.unsupportedOlderSchema(found: manifest.modelSchemaVersion, minimum: SchemaVersion.show)
+        }
         guard manifest.episodes.count <= 10_000,
               Set(manifest.episodes.map(\.id)).count == manifest.episodes.count else {
             throw PersistenceError.malformed("Invalid package episode index")
@@ -156,6 +159,9 @@ public enum ShowPackage {
         var remaining = snapshotLimit
         var model = try decodeComponent(ShowDocumentModel.self, manifest.catalog, snapshot: snapshot, used: &used, remaining: &remaining)
         guard model.episodes.isEmpty else { throw PersistenceError.malformed("Catalog contains embedded episodes") }
+        guard model.schemaVersion == manifest.modelSchemaVersion else {
+            throw PersistenceError.malformed("Package model version mismatch")
+        }
         if let reference = manifest.artwork {
             guard model.show.publication != nil, model.show.publication?.artwork == nil else {
                 throw PersistenceError.malformed("Invalid show artwork reference")
@@ -179,7 +185,7 @@ public enum ShowPackage {
         }
         guard manifest.revision >= 1 else { throw PersistenceError.invalidRevision(manifest.revision) }
         guard try canonicalChecksum(model) == manifest.checksum else { throw PersistenceError.checksumMismatch }
-        let issues = model.validationIssues() + model.embeddedMapIssues()
+        let issues = model.validationIssues(expectedSchemaVersion: manifest.modelSchemaVersion) + model.embeddedMapIssues()
         guard issues.isEmpty else { throw PersistenceError.invalidPayload(issues) }
         return DecodedDocument(payload: model, publication: PublicationStamp(revision: manifest.revision,
             publicationID: manifest.publicationID, checksum: manifest.checksum))

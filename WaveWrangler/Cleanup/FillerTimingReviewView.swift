@@ -382,9 +382,9 @@ struct FillerTimingReviewSummary: View {
     }
 
     private var findButton: some View {
-        Button("Find in saved transcript") { model.proposeFillers() }
+        Button("Find Filler Candidates") { model.proposeFillers() }
             .disabled(!model.canReviewFillers)
-            .help("Add exact-token suggestions to an existing current transcript without running inference. Existing decisions are preserved.")
+            .help("Refresh pending suggestions using configured filler words without running inference. Existing decisions and cuts are preserved.")
             .accessibilityIdentifier("ww.cleanup.filler.find")
     }
 

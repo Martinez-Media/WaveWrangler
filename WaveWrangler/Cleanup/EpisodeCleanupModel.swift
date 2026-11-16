@@ -474,6 +474,12 @@ final class EpisodeCleanupModel {
         do { configuration = try transcriptionSettings.captureConfiguration() }
         catch { self.error = Self.describe(error); return }
         let snapshot = state.store.residentModel
+        let fillerWords: [SpeakerID: FillerWords]
+        do { fillerWords = try configuredFillerWords(in: snapshot, speakers: plan?.lanes.map(\.speaker) ?? []) }
+        catch {
+            self.error = "Repair filler-word defaults in Transcription Settings before transcription, or set a show/speaker override."
+            return
+        }
         let token = UUID()
         generation = token
         workSnapshot = snapshot
@@ -503,7 +509,7 @@ final class EpisodeCleanupModel {
                       state.store.residentModel.hasSameMediaInputs(as: snapshot, in: episodeID, includingWorkingRange: true),
                       state.canEdit,
                       document === state.store.document else { throw CancellationError() }
-                guard try publishTranscripts(result, expecting: snapshot)
+                guard try publishTranscripts(result, expecting: snapshot, fillerWords: fillerWords)
                 else { throw CancellationError() }
                 message = "Transcribed \(result.count) speaker\(result.count == 1 ? "" : "s") locally. Word timing is approximate; no cuts were applied."
             } catch is CancellationError {
@@ -518,13 +524,19 @@ final class EpisodeCleanupModel {
     }
 
     /// Called only after all speakers and live source/timing verification have finished.
-    func publishTranscripts(_ result: [SpeakerTranscript], expecting snapshot: ShowDocumentModel) throws(DomainError) -> Bool {
+    func publishTranscripts(_ result: [SpeakerTranscript], expecting snapshot: ShowDocumentModel,
+                            fillerWords: [SpeakerID: FillerWords]? = nil) throws(DomainError) -> Bool {
         let live = state.store.residentModel
         guard live.hasSameMediaInputs(as: snapshot, in: episodeID, includingWorkingRange: true),
               live.episode(episodeID)?.cleanup?.transcripts == snapshot.episode(episodeID)?.cleanup?.transcripts,
-              live.episode(episodeID)?.cleanup?.transcriptHistory == snapshot.episode(episodeID)?.cleanup?.transcriptHistory
+              live.episode(episodeID)?.cleanup?.transcriptHistory == snapshot.episode(episodeID)?.cleanup?.transcriptHistory,
+              live.show.fillerWords == snapshot.show.fillerWords,
+              result.allSatisfy({ live.speaker($0.speaker)?.fillerWords == snapshot.speaker($0.speaker)?.fillerWords })
         else { return false }
-        let cleanup = try (live.episode(episodeID)?.cleanup ?? EpisodeCleanup()).replacingTranscripts(result)
+        let words: [SpeakerID: FillerWords]
+        if let fillerWords { words = fillerWords }
+        else { words = try configuredFillerWords(in: live, speakers: result.map(\.speaker)) }
+        let cleanup = try (live.episode(episodeID)?.cleanup ?? EpisodeCleanup()).replacingTranscripts(result, fillerWords: words)
         let updated = try live.settingCleanup(cleanup, in: episodeID)
         isPublishing = true
         defer { isPublishing = false }

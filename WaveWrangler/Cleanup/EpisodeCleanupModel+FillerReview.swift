@@ -111,10 +111,26 @@ extension EpisodeCleanupModel {
         let current = plan?.lanes.compactMap { transcript(for: $0) } ?? []
         var proposed = cleanup
         proposed.transcripts = current
-        proposed = proposed.proposingFillers()
+        do {
+            let words = try configuredFillerWords(in: state.store.residentModel, speakers: current.map(\.speaker))
+            proposed = proposed.proposingFillers(words: words, refreshingPending: true)
+        } catch {
+            self.error = "Filler words are unavailable. Repair app defaults in Transcription Settings or set a show/speaker override."
+            return
+        }
         proposed.transcripts = cleanup.transcripts
         guard proposed != cleanup else { return }
         saveFillerCleanup(proposed, action: "Find filler timing candidates")
+    }
+
+    func configuredFillerWords(in model: ShowDocumentModel, speakers: [SpeakerID]) throws(DomainError) -> [SpeakerID: FillerWords] {
+        var result: [SpeakerID: FillerWords] = [:]
+        for speaker in speakers {
+            guard let words = model.speaker(speaker)?.fillerWords ?? model.show.fillerWords ?? AppSettings.shared.fillerWords,
+                  words.isValid else { throw .invalidFillerWords }
+            result[speaker] = words
+        }
+        return result
     }
 
     func selectFiller(_ id: UUID, reveal: Bool = true, movePlayhead: Bool = true) {

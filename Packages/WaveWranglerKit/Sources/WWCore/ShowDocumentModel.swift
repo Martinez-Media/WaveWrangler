@@ -7,9 +7,10 @@ import Foundation
 public enum SchemaVersion {
     /// Canonical portable show document payload (`ShowDocumentModel`).
     /// Schema 14 is the oldest supported package model. Pre-container show schemas are retired.
+    /// Schema 15 adds inherited filler-word configuration and captured detector vocabularies.
     /// An embedded map's `timeMapSchemaVersion` is part of this schema: a time-map schema bump requires a show
     /// schema bump (pinned by `AlignmentPersistenceTests.schemaVersionsArePinned`).
-    public static let show = 14
+    public static let show = 15
     /// Canonical library document payload (`LibraryModel`).
     /// 2: adds `libraryID`. Schema 1 libraries are upgraded with a derived, stable ID (see WWPersistence
     /// `LibraryCoder`); the original bytes are kept as a backup before the first schema 2 publication.
@@ -63,14 +64,16 @@ public struct Show: Sendable, Equatable, Codable, Identifiable {
     public var notes: String
     public var profile: ShowProfile?
     public var publication: PublicationMetadata?
+    public var fillerWords: FillerWords?
 
     public init(id: ShowID = ShowID(), title: String, notes: String = "", profile: ShowProfile? = nil,
-                publication: PublicationMetadata? = nil) {
+                publication: PublicationMetadata? = nil, fillerWords: FillerWords? = nil) {
         self.id = id
         self.title = title
         self.notes = notes
         self.profile = profile
         self.publication = publication
+        self.fillerWords = fillerWords
     }
 }
 
@@ -81,11 +84,14 @@ public struct Speaker: Sendable, Equatable, Codable, Identifiable {
     public var name: String
     public var notes: String
     public var appearance: SpeakerAppearance?
+    public var fillerWords: FillerWords?
 
-    public init(id: SpeakerID = SpeakerID(), name: String, notes: String = "", appearance: SpeakerAppearance? = nil) {
+    public init(id: SpeakerID = SpeakerID(), name: String, notes: String = "", appearance: SpeakerAppearance? = nil,
+                fillerWords: FillerWords? = nil) {
         self.id = id
         self.name = name
         self.notes = notes
         self.appearance = appearance
+        self.fillerWords = fillerWords
     }
 }

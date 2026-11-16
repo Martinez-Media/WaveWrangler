@@ -2,6 +2,88 @@ import XCTest
 
 @MainActor
 final class ControlsSidebarUITests: XCTestCase {
+    func testFillerWordsConfigureDefaultsAndShowOverrideWithoutImplicitCuts() {
+        let app = launch(singlePrimary: true)
+        defer { app.terminate() }
+        let main = app.windows["ww.show.window"]
+        XCTAssertTrue(main.waitForExistence(timeout: 20))
+        app.typeKey(",", modifierFlags: .command)
+        let settings = app.windows["ww.settings.window"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 5))
+        settings.toolbars.buttons["Transcription"].click()
+        let defaults = settings.descendants(matching: .any).matching(identifier: "ww.settings.fillers.words").firstMatch
+        XCTAssertTrue(defaults.waitForExistence(timeout: 5))
+        defaults.click()
+        defaults.typeKey("a", modifierFlags: .command)
+        defaults.typeText("um")
+        settings.buttons["ww.settings.fillers.apply"].click()
+        XCTAssertEqual(defaults.value as? String, "um")
+        let settingsShot = XCTAttachment(screenshot: settings.screenshot())
+        settingsShot.name = "Configurable app filler-word defaults"
+        settingsShot.lifetime = .keepAlways
+        add(settingsShot)
+        settings.typeKey("w", modifierFlags: .command)
+        main.click()
+        let toggle = main.buttons["ww.review.toggle"]
+        if toggle.value as? String != "Shown" { toggle.click() }
+        let configure = main.buttons["ww.review.fillerWords"]
+        XCTAssertTrue(configure.waitForExistence(timeout: 5))
+        configure.click()
+        let customize = app.buttons["ww.show.fillers.customize"]
+        XCTAssertTrue(customize.waitForExistence(timeout: 5))
+        customize.click()
+        let words = app.descendants(matching: .any).matching(identifier: "ww.show.fillers.words").firstMatch
+        XCTAssertTrue(words.waitForExistence(timeout: 5))
+        words.click()
+        words.typeKey("a", modifierFlags: .command)
+        words.typeKey(.delete, modifierFlags: [])
+        app.buttons["ww.show.fillers.apply"].click()
+        XCTAssertEqual(words.value as? String, "")
+        let overrideShot = XCTAttachment(screenshot: main.screenshot())
+        overrideShot.name = "Explicit empty show filler-word override"
+        overrideShot.lifetime = .keepAlways
+        add(overrideShot)
+        app.typeKey(.escape, modifierFlags: [])
+        main.buttons["ww.review.findFillers"].click()
+        let rows = main.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'ww.cleanup.filler.review.'"))
+        XCTAssertTrue(wait { rows.count == 0 })
+        let cuts = main.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'ww.review.restore.'"))
+        XCTAssertEqual(cuts.count, 0)
+        configure.click()
+        app.buttons["ww.show.fillers.inherit"].click()
+        app.typeKey(.escape, modifierFlags: [])
+        main.buttons["ww.review.findFillers"].click()
+        XCTAssertTrue(wait { rows.count > 0 })
+        configure.click()
+        let scope = app.popUpButtons["ww.review.fillerWords.scope"]
+        XCTAssertTrue(scope.waitForExistence(timeout: 5))
+        scope.click()
+        app.menuItems["Host"].click()
+        app.buttons["ww.speaker.fillers.customize"].click()
+        let speakerWords = app.descendants(matching: .any).matching(identifier: "ww.speaker.fillers.words").firstMatch
+        XCTAssertTrue(speakerWords.waitForExistence(timeout: 5))
+        speakerWords.click()
+        speakerWords.typeKey("a", modifierFlags: .command)
+        speakerWords.typeText("you know")
+        app.buttons["ww.speaker.fillers.apply"].click()
+        XCTAssertTrue(app.staticTexts["Enter up to 128 single words (letters only, at most 64 UTF-8 bytes each). Phrases are not supported."]
+            .waitForExistence(timeout: 5))
+        speakerWords.click()
+        speakerWords.typeKey("a", modifierFlags: .command)
+        speakerWords.typeKey(.delete, modifierFlags: [])
+        app.buttons["ww.speaker.fillers.apply"].click()
+        app.typeKey(.escape, modifierFlags: [])
+        main.buttons["ww.review.findFillers"].click()
+        XCTAssertTrue(wait { rows.count == 0 })
+        configure.click()
+        scope.click()
+        app.menuItems["Host"].click()
+        app.buttons["ww.speaker.fillers.inherit"].click()
+        app.typeKey(.escape, modifierFlags: [])
+        main.buttons["ww.review.findFillers"].click()
+        XCTAssertTrue(wait { rows.count > 0 })
+    }
+
     func testDefaultWorkspaceActivityTogglesKeepDetailedAlignmentOffTheCanvas() {
         exerciseSidebars(minimumSize: false)
     }

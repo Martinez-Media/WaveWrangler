@@ -3,6 +3,7 @@ import Foundation
 /// Why a pure domain operation refused to produce a new value.
 public enum DomainError: Error, Sendable, Equatable {
     case invalidCleanup
+    case invalidFillerWords
     case invalidWorkspace(String)
     case invalidMix(String)
     case invalidAudio(String)

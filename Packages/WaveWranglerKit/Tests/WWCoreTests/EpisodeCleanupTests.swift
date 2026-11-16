@@ -4,6 +4,66 @@ import WWCore
 
 @Suite("Episode cleanup range and transcript state")
 struct EpisodeCleanupTests {
+    @Test func configuredWordsNormalizeMatchWholeWordsAndInheritBySpeaker() throws {
+        let words = try FillerWords(text: " Like, UM\nlike, (Éh)")
+        #expect(words.words == ["like", "um", "éh"])
+        #expect(words.contains("“LIKE!”"))
+        #expect(!words.contains("likely") && !words.contains("um-hum"))
+        for invalid in ["you know", "uh2", "um-hum", String(repeating: "a", count: 65)] {
+            #expect(throws: DomainError.invalidFillerWords) { try FillerWords(text: invalid) }
+        }
+        let speaker = Speaker(name: "Host")
+        var model = ShowDocumentModel(show: Show(title: "Show"), speakers: [speaker])
+        #expect(model.fillerWords(for: speaker.id, appDefaults: words) == words)
+        let showWords = try FillerWords(["well"])
+        model = try model.settingFillerWords(showWords)
+        #expect(model.fillerWords(for: speaker.id, appDefaults: words) == showWords)
+        let disabled = try FillerWords([])
+        model = try model.settingFillerWords(disabled, for: speaker.id)
+        #expect(model.fillerWords(for: speaker.id, appDefaults: words).words.isEmpty)
+        model = try model.settingFillerWords(nil, for: speaker.id)
+        #expect(model.fillerWords(for: speaker.id, appDefaults: words) == showWords)
+        #expect(model.validationIssues().isEmpty)
+    }
+
+    @Test func configuredRescanPreservesJudgmentsCutsAndCapturedVocabulary() throws {
+        let transcript = transcript()
+        var cleanup = EpisodeCleanup(transcripts: [transcript]).proposingFillers()
+        cleanup.fillerReviews![0].decision = .rejected
+        let retained = cleanup.fillerReviews![0]
+        let cutLinked = cleanup.fillerReviews![1]
+        cleanup.manualCuts = [.init(markerID: cutLinked.id, alignmentRevision: 1, startFrame: 72_000, endFrame: 84_000)]
+        let words = try FillerWords(["summer"])
+        let refreshed = cleanup.proposingFillers(words: [transcript.speaker: words], refreshingPending: true)
+        let reviews = try #require(refreshed.fillerReviews)
+        #expect(reviews.count == 3)
+        #expect(reviews[0] == retained && reviews[1] == cutLinked)
+        #expect(reviews[2].word?.text == "summer")
+        #expect(reviews[2].detectorWords == words && reviews[2].isValid)
+        #expect(refreshed.transcripts == cleanup.transcripts && refreshed.manualCuts == cleanup.manualCuts)
+        #expect(refreshed.proposingFillers(words: [transcript.speaker: words], refreshingPending: true) == refreshed)
+        let disabled = refreshed.proposingFillers(words: [transcript.speaker: try FillerWords([])], refreshingPending: true)
+        #expect(disabled.fillerReviews == [retained, cutLinked])
+        #expect(disabled.isValid)
+    }
+
+    @Test func configuredDetectorRejectsForgedRulesAndRetainsLegacyProvenance() throws {
+        let transcript = transcript()
+        let legacy = FillerTimingReview(origin: .detected, speaker: transcript.speaker, primary: transcript.primary,
+            sourceRate: transcript.sourceRate, sourceIdentity: transcript.sourceIdentity, alignmentRevision: 1,
+            transcriptID: transcript.id, word: transcript.words[0], modelRecipe: transcript.model,
+            detectorRecipe: "exact-hesitations/1:um,uh,erm,er",
+            initialBounds: FillerTimingBounds(word: transcript.words[0])!,
+            detectedBounds: FillerTimingBounds(word: transcript.words[0])!)
+        #expect(legacy.isValid)
+        let encoded = try JSONEncoder().encode(FillerTimingReview.detections(in: transcript)[0])
+        var object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        object["detectorWords"] = ["words": ["summer"]]
+        let forged = try JSONDecoder().decode(FillerTimingReview.self, from: JSONSerialization.data(withJSONObject: object))
+        #expect(!forged.isValid)
+        #expect(try JSONDecoder().decode(FillerTimingReview.self, from: JSONEncoder().encode(legacy)) == legacy)
+    }
+
     @Test func speakerMutesAreChannelSpecificAndInvalidateProcessingNotMedia() throws {
         let source = SourceID(), backup = SourceID(), speaker = SpeakerID(), other = SpeakerID()
         let mute = SpeakerMuteRegion(speaker: speaker, alignmentRevision: 1, startFrame: 48_000, endFrame: 96_000)

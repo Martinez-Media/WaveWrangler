@@ -199,6 +199,7 @@ extension DocumentOpener where Coder == ShowPackageCoder {
         recovery: RecoveryStore?
     ) -> DocumentOpener<ShowPackageCoder> {
         DocumentOpener(coder: ShowPackageCoder(), ops: ops, coordination: coordination, recovery: recovery,
-                       identityOf: { .show($0.show.id) })
+                       migratableSchemas: [14], identityOf: { .show($0.show.id) },
+                       recoveryDecode: ShowCatalogMigration.preview)
     }
 }

@@ -46,11 +46,27 @@ Open **Transcript & Review** in the bottom pane or detach it into its own window
 Select a word or review row to locate its approximate interval on the waveform.
 Double-click a row to audition its current segment.
 
-New transcripts propose exact recognized `um`, `uh`, `erm`, and `er` tokens.
-**Find in saved transcript** adds suggestions to existing current text without
-running inference. This is not configurable phrase detection or automatic
-silence removal. **Mark missed filler** creates a human proposal when recognition
-misses something.
+New transcripts propose recognized filler words using the configured list
+(by default `um`, `uh`, `erm`, and `er`). **Find Filler Candidates** scans current
+saved text without running inference or reading recordings.
+**Mark missed filler** creates a human proposal when recognition misses something.
+
+Configure app defaults in **Settings > Transcription > Filler-word defaults**.
+Use **Filler Words…** in Review to customize this show or a speaker; the same
+overrides are available in Show info and Recordings & Speakers. Speaker overrides
+apply throughout the show and take precedence over show words, which take
+precedence over app defaults. Each override replaces the inherited list rather
+than adding to it. **Use Show Defaults** / **Use App Defaults** restores inheritance.
+
+Enter single words separated by commas or new lines, then choose **Apply Words**.
+Matching ignores case and surrounding punctuation. Phrases are not supported;
+an empty override turns off automatic suggestions at that scope.
+Changing words does not rescan or cut audio. The next transcription or explicit
+**Find Filler Candidates** uses the new words; a scan refreshes pending suggestions
+while retaining reviewed, rejected, adjusted, manual and cut-linked intervals.
+Judgments and cuts are never changed by word settings or scans.
+Show/speaker edits support Undo and save with the show; app defaults stay on
+this Mac. Older shows require the explicit format Update before editing.
 
 Listen using **Word**, **With context**, or **Loop**. Drag boundary handles, use
 numeric fields, or make small nudges before deciding. Boundaries cannot cross

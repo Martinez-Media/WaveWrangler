@@ -6,10 +6,11 @@ rebuildable. Originals remain immutable throughout import, editing and export.
 
 ## Canonical formats and migration
 
-The current show schema is **14**, library schema **2**
+The current show schema is **15**, library schema **2**
 (`WWCore/ShowDocumentModel.swift`). Show additions include the mixer (9),
 supplemental audio (10), production bounds (11), rack positions (12),
-speaker mutes (13), and publication metadata/artwork (14).
+speaker mutes (13), publication metadata/artwork (14), and scoped filler-word
+configuration with captured detection vocabulary (15).
 Embedded time-map format changes require a show schema bump too.
 
 Library envelopes contain `checksum`, `format`, `payload`, `publicationID`,
@@ -28,6 +29,12 @@ them, or rewrite recovery/derived state on refusal.
 Show model schema 14 is the supported container baseline. Pre-container JSON
 shows and their schema 1-13 migrations are retired; they are not decoded or
 offered for conversion. The library's independent schema migration remains.
+Schema-14 packages open as read-only previews and require explicit **Update**
+before editing. Migration preserves existing reviews and leaves show/speaker
+word overrides absent (inheriting app defaults); it never rescans transcripts.
+Both supported package storage versions retain exact original backup bytes.
+Older supported recovery checkpoints remain available through the same strict,
+read-only migration preview; unknown fields or newer schemas still refuse.
 
 For every future package/model schema bump, register an explicit step in
 `ShowCatalogMigration` and update version admission in `ShowPackage`. Refuse
@@ -42,7 +49,7 @@ recovery and unsupported-version refusal. Never invent user decisions or grants.
 New `.wwshow` documents use `com.brandonmartinez.wavewrangler.show-package`,
 conforming to `com.apple.package`, not JSON. This is the only registered/openable
 show type; the retired JSON UTI is no longer declared. Native package storage version **2** is independent of model schema
-14. `Manifest.json` indexes `Components/<SHA256>` files: a catalog without
+15. `Manifest.json` indexes `Components/<SHA256>` files: a catalog without
 episodes, one component per episode, and original binary artwork. JSON
 components use bounded LZFSE only when smaller; artwork stays uncompressed.
 Historical transcripts, individual word IDs and review provenance remain intact.

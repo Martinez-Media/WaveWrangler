@@ -18,6 +18,8 @@ final class AppSettings {
     @ObservationIgnored private let defaults: UserDefaults
     static let controlBarKey = "WWEpisodeControlBar"
     private(set) var controlBarError: String?
+    private(set) var fillerWords: FillerWords?
+    private(set) var fillerWordsError: String?
     var controlBar = ControlBarConfiguration() {
         didSet {
             guard controlBar != oldValue else { return }
@@ -97,6 +99,7 @@ final class AppSettings {
         cutJumpBackSeconds = preferences.cutJumpBackSeconds
         autoInputGainTargetDBFS = preferences.autoInputGainTargetDBFS
         reloadControlBar()
+        reloadFillerWords()
         observer = NotificationCenter.default.addObserver(
             forName: UserDefaults.didChangeNotification, object: defaults, queue: .main
         ) { [weak self] _ in
@@ -106,10 +109,12 @@ final class AppSettings {
 
     private func reload() {
         reloadControlBar()
+        reloadFillerWords()
         if autosaveEnabled != preferences.autosaveEnabled { autosaveEnabled = preferences.autosaveEnabled }
         if downloadSourcesAutomatically != preferences.downloadSourcesAutomatically {
             downloadSourcesAutomatically = preferences.downloadSourcesAutomatically
         }
+
         if textSize != preferences.textSize { textSize = preferences.textSize }
         if workspacesInSeparateWindows != preferences.workspacesInSeparateWindows {
             workspacesInSeparateWindows = preferences.workspacesInSeparateWindows
@@ -125,6 +130,27 @@ final class AppSettings {
         }
         if autoInputGainTargetDBFS != preferences.autoInputGainTargetDBFS {
             autoInputGainTargetDBFS = preferences.autoInputGainTargetDBFS
+        }
+    }
+
+    private func reloadFillerWords() {
+        do {
+            fillerWords = try preferences.fillerWords()
+            fillerWordsError = nil
+        } catch {
+            fillerWords = nil
+            fillerWordsError = "Filler-word defaults could not be loaded. Enter a valid list or Restore Defaults in Transcription Settings."
+            Logger(subsystem: "com.brandonmartinez.WaveWrangler", category: "Preferences")
+                .error("Invalid filler-word defaults: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    func setFillerWords(_ value: FillerWords) {
+        do {
+            try preferences.setFillerWords(value)
+            reloadFillerWords()
+        } catch {
+            fillerWordsError = "Filler words could not be saved. Use up to 128 single words, each at most 64 UTF-8 bytes."
         }
     }
 

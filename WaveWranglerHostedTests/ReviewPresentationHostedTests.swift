@@ -3,11 +3,146 @@ import Foundation
 import Testing
 import WWCore
 import WWOrganizer
+import WWPersistence
 @testable import WaveWrangler
 
 @MainActor
 @Suite("Episode-owned detachable transcript review", .serialized)
 struct ReviewPresentationHostedTests {
+    @Test func schema14ShowStaysReadOnlyUntilExplicitVerifiedUpdate() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: "WWFillerMigration-\(UUID())")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appending(path: "Previous.wwshow")
+        let showID = ShowID()
+        // Independent previous-schema bytes, never encoded by the current model/coder.
+        let catalog = Data("""
+        {"history":{"cursor":0,"entries":[]},"schemaVersion":14,"show":{"id":"\(showID)","notes":"Original notes","title":"Previous show"},"speakers":[]}
+        """.utf8)
+        let digest = RevisionFingerprint.digest(catalog)
+        let index: [String: Any] = [
+            "catalog": ["digest": digest, "byteCount": catalog.count, "encoding": "raw"], "episodes": [],
+        ]
+        let indexBytes = try JSONSerialization.data(withJSONObject: index, options: [.sortedKeys, .withoutEscapingSlashes])
+        let manifest: [String: Any] = [
+            "format": "com.brandonmartinez.wavewrangler.show-package", "schemaVersion": 2, "modelSchemaVersion": 14,
+            "revision": 7, "publicationID": UUID().uuidString, "index": index,
+            "checksum": "sha256:" + RevisionFingerprint.digest(Data("WWShowCatalog2\0".utf8) + indexBytes),
+        ]
+        let wrapper = FileWrapper(directoryWithFileWrappers: [
+            "Manifest.json": FileWrapper(regularFileWithContents: try JSONSerialization.data(withJSONObject: manifest, options: .sortedKeys)),
+            "Components": FileWrapper(directoryWithFileWrappers: [digest: FileWrapper(regularFileWithContents: catalog)]),
+        ])
+        try wrapper.write(to: url, options: .atomic, originalContentsURL: nil)
+        let original = try LocalFileOperations().read(url)
+        let document = try #require(NSDocumentController.shared.makeDocument(withContentsOf: url, ofType: DocumentTypes.show) as? ShowDocument)
+        defer { document.close() }
+        let awaiting = document.isAwaitingFormatUpdate
+        let editableBefore = document.store.canEdit
+        #expect(awaiting && !editableBefore)
+        #expect(try LocalFileOperations().read(url) == original)
+        document.updateFormat()
+        let deadline = ContinuousClock.now.advanced(by: .seconds(10))
+        while document.isAwaitingFormatUpdate, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let editableAfter = document.store.canEdit && !document.isAwaitingFormatUpdate
+        try #require(editableAfter)
+        let decoded = try ShowPackageCoder().decode(LocalFileOperations().read(url))
+        #expect(decoded.payload.schemaVersion == 15 && decoded.payload.show.notes == "Original notes")
+        #expect(decoded.payload.show.fillerWords == nil && decoded.revision == 8)
+        let backups = try PersistenceEnvironment.recovery.migrationBackups(for: .show(showID))
+        #expect(try backups.contains { try Data(contentsOf: $0) == original })
+        let reopened = try #require(NSDocumentController.shared.makeDocument(withContentsOf: url, ofType: DocumentTypes.show) as? ShowDocument)
+        defer { reopened.close() }
+        let reopenedEditable = reopened.store.canEdit && !reopened.isAwaitingFormatUpdate
+        #expect(reopenedEditable)
+    }
+
+    @Test func fillerWordOverridesAreSharedUndoableAndPersistWithoutChangingReviews() async throws {
+        let restoreDefaults = useDefaultFillerWords()
+        defer { restoreDefaults() }
+        let (f, cleanup, state) = try await ReviewPanelHostedTests().fixture()
+        defer { cleanup.cancel(); f.close() }
+        let store = f.document.store
+        let before = store.residentModel
+        let review = try #require(cleanup.fillerReviews.first)
+        let words = try FillerWords(["well"])
+        let other = ShowWindowState(store: store, episodeID: cleanup.episodeID)
+        let undo = try #require(f.document.undoManager)
+        while undo.groupingLevel > 0 { undo.endUndoGrouping() }
+        undo.removeAllActions()
+        undo.groupsByEvent = false
+        defer { undo.groupsByEvent = true }
+        undo.beginUndoGrouping()
+        let applied = store.apply("Change Show Filler Words") { model throws(DomainError) in
+            try model.settingFillerWords(words)
+        }
+        undo.endUndoGrouping()
+        #expect(applied)
+        let sharedWords = other.store.residentModel.show.fillerWords
+        let originalReviews = cleanup.fillerReviews == before.episode(cleanup.episodeID)?.cleanup?.fillerReviews
+        #expect(sharedWords == words && originalReviews)
+        undo.undo()
+        let restored = state.store.residentModel == before
+        #expect(restored)
+        undo.redo()
+        let restoredWords = store.residentModel.show.fillerWords
+        #expect(restoredWords == words)
+        let disabled = try FillerWords([])
+        let speakerApplied = store.apply("Change Speaker Filler Words") { model throws(DomainError) in
+            try model.settingFillerWords(disabled, for: review.speaker)
+        }
+        #expect(speakerApplied)
+        let configured = try cleanup.configuredFillerWords(in: store.residentModel, speakers: [review.speaker])
+        #expect(configured[review.speaker] == disabled)
+        let expected = store.residentModel
+        try await f.document.save(to: #require(f.document.fileURL), ofType: DocumentTypes.show, for: .saveOperation)
+        let reopened = try WWPersistence.ShowPackageCoder().decode(WWPersistence.LocalFileOperations().read(#require(f.document.fileURL)))
+        let persisted = reopened.payload == expected
+        #expect(persisted)
+    }
+
+    @Test func fillerRescanUsesSpeakerRulesAndRejectsLatePublicationAfterRuleEdits() async throws {
+        let restoreDefaults = useDefaultFillerWords()
+        defer { restoreDefaults() }
+        let (f, cleanup, _) = try await ReviewPanelHostedTests().fixture()
+        defer { cleanup.cancel(); f.close() }
+        let store = f.document.store
+        let before = store.residentModel
+        let transcripts = try #require(before.episode(cleanup.episodeID)?.cleanup?.transcripts)
+        let speaker = try #require(transcripts.first?.speaker)
+        let words = try FillerWords(["uh"])
+        let applied = store.apply("Change Speaker Filler Words") { model throws(DomainError) in
+            try model.settingFillerWords(words, for: speaker)
+        }
+        #expect(applied)
+        let current = store.residentModel
+        let refused = try !cleanup.publishTranscripts(transcripts, expecting: before)
+        #expect(refused)
+        cleanup.proposeFillers()
+        let reviews = cleanup.fillerReviews
+        #expect(reviews.count == 1 && reviews.first?.word?.text == "uh" && reviews.first?.detectorWords == words)
+        let rawUnchanged = store.residentModel.episode(cleanup.episodeID)?.cleanup?.transcripts
+            == current.episode(cleanup.episodeID)?.cleanup?.transcripts
+        #expect(rawUnchanged)
+        let scanned = store.residentModel
+        cleanup.proposeFillers()
+        let idempotent = store.residentModel == scanned
+        #expect(idempotent)
+    }
+
+    private func useDefaultFillerWords() -> @MainActor () -> Void {
+        let defaults = UserDefaults.standard
+        let stored = defaults.object(forKey: PreferenceKey.fillerWords)
+        AppSettings.shared.setFillerWords(.defaults)
+        return {
+            if let stored { defaults.set(stored, forKey: PreferenceKey.fillerWords) }
+            else { defaults.removeObject(forKey: PreferenceKey.fillerWords) }
+            NotificationCenter.default.post(name: UserDefaults.didChangeNotification, object: defaults)
+        }
+    }
+
     private func settle() async throws { try await Task.sleep(for: .milliseconds(150)) }
 
     private func capture(_ window: NSWindow, name: String) throws {

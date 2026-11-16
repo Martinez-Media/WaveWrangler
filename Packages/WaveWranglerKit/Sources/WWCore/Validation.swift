@@ -40,6 +40,10 @@ extension ShowDocumentModel {
         var issues: [ValidationIssue] = []
         issues += workspaceValidationIssues(expectedSchemaVersion: expectedSchemaVersion)
         issues += publicationValidationIssues(expectedSchemaVersion: expectedSchemaVersion)
+        if show.fillerWords?.isValid == false || speakers.contains(where: { $0.fillerWords?.isValid == false })
+            || (expectedSchemaVersion < 15 && (show.fillerWords != nil || speakers.contains(where: { $0.fillerWords != nil }))) {
+            issues.append(.init(.invalidCleanup, "Invalid or unsupported filler-word configuration"))
+        }
         if schemaVersion != expectedSchemaVersion {
             issues.append(.init(.schemaVersionMismatch, "payload \(schemaVersion) != expected \(expectedSchemaVersion)"))
         }
@@ -57,6 +61,10 @@ extension ShowDocumentModel {
 
         let speakerIDs = Set(speakers.map(\.id))
         for episode in episodes {
+            if expectedSchemaVersion < 15,
+               episode.cleanup?.fillerReviews?.contains(where: { $0.detectorWords != nil }) == true {
+                issues.append(.init(.invalidCleanup, "Configured filler detection requires schema 15"))
+            }
             issues += Self.issues(in: episode, speakerIDs: speakerIDs)
             issues += episode.productionRange?.validationIssues(in: episode) ?? []
             issues += episode.audioArrangement?.validationIssues(in: episode) ?? []

@@ -1,5 +1,70 @@
 import Foundation
 
+/// A bounded, canonical whole-word vocabulary. Empty explicitly disables automatic suggestions.
+public struct FillerWords: Sendable, Equatable, Codable {
+    public let words: [String]
+
+    public static let defaults = Self(canonicalWords: ["er", "erm", "uh", "um"])
+
+    private init(canonicalWords: [String]) { words = canonicalWords }
+
+    private enum CodingKeys: String, CodingKey { case words }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        words = try container.decode([String].self, forKey: .words)
+        guard isValid else {
+            throw DecodingError.dataCorruptedError(forKey: .words, in: container,
+                debugDescription: "Filler words must be a sorted unique list of up to 128 normalized single words.")
+        }
+    }
+
+    public init(_ words: [String]) throws(DomainError) {
+        let canonical = Array(Set(words.map(Self.normalized))).sorted()
+        self.init(canonicalWords: canonical)
+        guard isValid else { throw .invalidFillerWords }
+    }
+
+    public init(text: String) throws(DomainError) {
+        guard text.utf8.count <= 16_384 else { throw .invalidFillerWords }
+        try self.init(text.components(separatedBy: .newlines.union(CharacterSet(charactersIn: ",")))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })
+    }
+
+    public var isValid: Bool {
+        words.count <= 128 && words == Array(Set(words)).sorted()
+            && words.allSatisfy {
+                !$0.isEmpty && $0.utf8.count <= 64 && $0 == Self.normalized($0)
+                    && $0.unicodeScalars.allSatisfy { CharacterSet.letters.union(.nonBaseCharacters).contains($0) }
+            }
+    }
+
+    public func contains(_ text: String) -> Bool { words.contains(Self.normalized(text)) }
+
+    private static func normalized(_ text: String) -> String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+            .lowercased(with: Locale(identifier: "en_US_POSIX")).precomposedStringWithCanonicalMapping
+    }
+}
+
+extension ShowDocumentModel {
+    public func fillerWords(for speaker: SpeakerID, appDefaults: FillerWords) -> FillerWords {
+        self.speaker(speaker)?.fillerWords ?? show.fillerWords ?? appDefaults
+    }
+
+    public func settingFillerWords(_ words: FillerWords?, for speaker: SpeakerID? = nil) throws(DomainError) -> Self {
+        guard schemaVersion == SchemaVersion.show, words?.isValid != false else { throw .invalidFillerWords }
+        var result = self
+        if let speaker {
+            guard let index = speakers.firstIndex(where: { $0.id == speaker }) else { throw .speakerNotFound(speaker) }
+            result.speakers[index].fillerWords = words
+        } else {
+            result.show.fillerWords = words
+        }
+        return result
+    }
+}
+
 /// Audible-word timing for human review, never an editorial cut interval.
 public struct FillerTimingBounds: Sendable, Equatable, Codable {
     public let sourceStartFrame: Int64
@@ -45,6 +110,7 @@ public struct FillerTimingReview: Sendable, Equatable, Codable, Identifiable {
     public let modelRecipe: String?
     public let analyzedRange: EpisodeWorkingRange?
     public let detectorRecipe: String?
+    public let detectorWords: FillerWords?
     public let initialBounds: FillerTimingBounds
     public let detectedBounds: FillerTimingBounds?
     public var humanBounds: FillerTimingBounds?
@@ -53,7 +119,7 @@ public struct FillerTimingReview: Sendable, Equatable, Codable, Identifiable {
     public init(id: UUID = UUID(), origin: FillerReviewOrigin, speaker: SpeakerID,
                 primary: ChannelReference, sourceRate: Int, sourceIdentity: String, alignmentRevision: Int,
                 transcriptID: UUID? = nil, word: TranscriptWord? = nil, modelRecipe: String? = nil,
-                analyzedRange: EpisodeWorkingRange? = nil, detectorRecipe: String? = nil,
+                analyzedRange: EpisodeWorkingRange? = nil, detectorRecipe: String? = nil, detectorWords: FillerWords? = nil,
                 initialBounds: FillerTimingBounds, detectedBounds: FillerTimingBounds? = nil,
                 humanBounds: FillerTimingBounds? = nil, decision: FillerReviewDecision = .pending) {
         self.id = id
@@ -68,6 +134,7 @@ public struct FillerTimingReview: Sendable, Equatable, Codable, Identifiable {
         self.modelRecipe = modelRecipe
         self.analyzedRange = analyzedRange
         self.detectorRecipe = detectorRecipe
+        self.detectorWords = detectorWords
         self.initialBounds = initialBounds
         self.detectedBounds = detectedBounds
         self.humanBounds = humanBounds
@@ -109,11 +176,19 @@ public struct FillerTimingReview: Sendable, Equatable, Codable, Identifiable {
               word == nil || transcriptID != nil else { return false }
         switch origin {
         case .detected:
-            return transcriptID != nil && Self.isHesitation(word?.text ?? "")
+            let recognized: Bool
+            if detectorRecipe == Self.detectorVersion, detectorWords == nil {
+                recognized = Self.isHesitation(word?.text ?? "")
+            } else if detectorRecipe == Self.configuredDetectorVersion, let detectorWords, detectorWords.isValid {
+                recognized = detectorWords.contains(word?.text ?? "")
+            } else {
+                recognized = false
+            }
+            return transcriptID != nil && recognized
                 && word.flatMap(FillerTimingBounds.init(word:)) == detectedBounds
-                && detectedBounds == initialBounds && detectorRecipe == Self.detectorVersion
+                && detectedBounds == initialBounds
         case .manual:
-            return detectedBounds == nil && detectorRecipe == nil
+            return detectedBounds == nil && detectorRecipe == nil && detectorWords == nil
         }
     }
 
@@ -125,21 +200,23 @@ public struct FillerTimingReview: Sendable, Equatable, Codable, Identifiable {
     }
 
     public static let detectorVersion = "exact-hesitations/1:um,uh,erm,er"
+    public static let configuredDetectorVersion = "configured-whole-words/2"
 
     public static func isHesitation(_ text: String) -> Bool {
         let token = text.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters)).lowercased()
         return ["um", "uh", "erm", "er"].contains(token)
     }
 
-    public static func detections(in transcript: SpeakerTranscript) -> [Self] {
-        guard transcript.isValid else { return [] }
+    public static func detections(in transcript: SpeakerTranscript, words: FillerWords = .defaults) -> [Self] {
+        guard transcript.isValid, words.isValid else { return [] }
         return transcript.words.compactMap { word in
-            guard isHesitation(word.text), let bounds = FillerTimingBounds(word: word) else { return nil }
+            guard words.contains(word.text), let bounds = FillerTimingBounds(word: word) else { return nil }
             return Self(origin: .detected, speaker: transcript.speaker, primary: transcript.primary,
                 sourceRate: transcript.sourceRate, sourceIdentity: transcript.sourceIdentity,
                 alignmentRevision: transcript.alignmentRevision, transcriptID: transcript.id, word: word,
                 modelRecipe: transcript.model, analyzedRange: transcript.workingRange,
-                detectorRecipe: detectorVersion, initialBounds: bounds, detectedBounds: bounds)
+                detectorRecipe: configuredDetectorVersion, detectorWords: words,
+                initialBounds: bounds, detectedBounds: bounds)
         }
     }
 

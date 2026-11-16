@@ -6,6 +6,9 @@ struct TranscriptionSettingsView: View {
 
     var body: some View {
         Form {
+            Section("Filler-word defaults") {
+                AppFillerWordsEditor()
+            }
             Section("Local Whisper") {
                 Picker("Transcription model", selection: $settings.selection) {
                     ForEach(LocalWhisperWeights.allCases, id: \.self) { weights in

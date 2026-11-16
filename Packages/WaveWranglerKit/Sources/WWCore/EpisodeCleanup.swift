@@ -131,7 +131,8 @@ public struct EpisodeCleanup: Sendable, Equatable, Codable {
             && Set((speakerMuteRegions ?? []).map(\.id)).count == (speakerMuteRegions?.count ?? 0)
     }
 
-    public func replacingTranscripts(_ replacement: [SpeakerTranscript]) throws(DomainError) -> Self {
+    public func replacingTranscripts(_ replacement: [SpeakerTranscript],
+                                    fillerWords: [SpeakerID: FillerWords] = [:]) throws(DomainError) -> Self {
         var result = self
         var history = transcriptHistory ?? []
         for prior in transcripts where !replacement.contains(prior) {
@@ -141,10 +142,11 @@ public struct EpisodeCleanup: Sendable, Equatable, Codable {
         result.transcriptHistory = history.isEmpty ? nil : history
         result.transcripts = replacement
         if replacement != transcripts {
-            result.fillerReviews = fillerReviews?.filter(\.retainsUserJudgment)
+            let cutMarkers = Set((manualCuts ?? []).compactMap(\.markerID))
+            result.fillerReviews = fillerReviews?.filter { $0.retainsUserJudgment || cutMarkers.contains($0.id) }
         }
         guard result.isValid else { throw .invalidCleanup }
-        result = result.proposingFillers()
+        result = result.proposingFillers(words: fillerWords)
         guard result.isValid else { throw .invalidCleanup }
         return result
     }
@@ -166,22 +168,29 @@ public struct EpisodeCleanup: Sendable, Equatable, Codable {
     }
 
     /// Existing decisions, including rejections and stale history, are never overwritten by another scan.
-    public func proposingFillers() -> Self {
+    public func proposingFillers(words: [SpeakerID: FillerWords] = [:], refreshingPending: Bool = false) -> Self {
         var result = self
         var reviews = fillerReviews ?? []
+        if refreshingPending {
+            let cutMarkers = Set((manualCuts ?? []).compactMap(\.markerID))
+            reviews.removeAll {
+                !$0.retainsUserJudgment && !cutMarkers.contains($0.id)
+                    && ($0.detectorWords ?? .defaults) != (words[$0.speaker] ?? .defaults)
+            }
+        }
         let validatedEvents = ValidatedFillerEvents(reviews)
         let existing = Set(reviews.compactMap { review -> String? in
             guard let transcript = review.transcriptID, let word = review.word?.id else { return nil }
             return "\(transcript)/\(word)"
         })
         for transcript in transcripts {
-            reviews += FillerTimingReview.detections(in: transcript).filter { detection in
+            reviews += FillerTimingReview.detections(in: transcript, words: words[transcript.speaker] ?? .defaults).filter { detection in
                 guard let word = detection.word else { return false }
                 return !existing.contains("\(transcript.id)/\(word.id)")
                     && !validatedEvents.contains(detection)
             }
         }
-        if !reviews.isEmpty { result.fillerReviews = reviews }
+        result.fillerReviews = reviews.isEmpty ? nil : reviews
         return result
     }
 }

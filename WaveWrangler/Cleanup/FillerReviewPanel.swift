@@ -311,6 +311,7 @@ struct FillerReviewPanel: View {
     @Bindable var model: EpisodeCleanupModel
     var detached = false
     @State private var selection: UUID?
+    @State private var showsFillerWords = false
 
     private var rows: [FillerReviewRow] {
         model.reviewRows.filter {
@@ -395,11 +396,20 @@ struct FillerReviewPanel: View {
             }
             Divider()
             HStack {
-                Button("Find in saved transcript") { model.proposeFillers() }.disabled(!model.canReviewFillers)
+                Button("Find Filler Candidates") { model.proposeFillers() }
+                    .disabled(!model.canReviewFillers)
+                    .help("Refresh pending suggestions using the current filler words. Existing judgments and cuts are retained; no audio is read or cut.")
+                    .accessibilityIdentifier("ww.review.findFillers")
+                Button("Filler Words…") { showsFillerWords = true }
+                    .accessibilityIdentifier("ww.review.fillerWords")
+                    .popover(isPresented: $showsFillerWords) {
+                        ReviewFillerWordsSettings(store: model.state.store, episodeID: model.episodeID)
+                    }
                 Button("Mark missed filler") { model.markMissedFiller() }.disabled(!model.canReviewFillers)
                 Text("Select to center and zoom; double-click to play. Auto Cut uses the current boundaries on all tracks.")
                     .font(.caption).foregroundStyle(.secondary).lineLimit(2)
             }
+
             .controlSize(.small)
             .padding(6)
         }

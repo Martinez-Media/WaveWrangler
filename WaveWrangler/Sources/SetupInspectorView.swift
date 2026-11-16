@@ -598,6 +598,8 @@ private struct SpeakerInspector: View {
             .accessibilityIdentifier("ww.inspector.speaker.name")
 
         SpeakerAppearanceEditor(store: model.store, episodeID: model.episodeID, speakerID: speakerID)
+        DocumentFillerWordsEditor(store: model.store, speakerID: speakerID)
+            .id(speakerID)
         Divider()
         let choices = model.channelChoices(for: speakerID)
         let assignment = model.episode?.assignment(for: speakerID)

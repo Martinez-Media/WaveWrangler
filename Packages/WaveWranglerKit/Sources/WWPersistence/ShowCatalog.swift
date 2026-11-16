@@ -83,7 +83,7 @@ public struct StoredCatalogEpisode: Sendable, Equatable, Identifiable {
         if let newer = model.newerEmbeddedTimeMapSchema() {
             throw PersistenceError.unknownNewerSchema(found: newer.found, supported: newer.supported)
         }
-        let issues = model.validationIssues() + model.embeddedMapIssues()
+        let issues = model.validationIssues(expectedSchemaVersion: header.schemaVersion) + model.embeddedMapIssues()
         guard issues.isEmpty else { throw PersistenceError.invalidPayload(issues) }
         return episode
     }
@@ -174,7 +174,10 @@ public struct ShowCatalog: Sendable, Equatable {
 
     public static func validate(header: ShowCatalogHeader, summaries: [CatalogEpisodeSummary]) throws {
         guard summaries.count <= 10_000 else { throw PersistenceError.malformed("Package exceeds 10,000 episodes") }
-        let issues = header.operationModel(episodes: []).validationIssues()
+        guard (14...SchemaVersion.show).contains(header.schemaVersion) else {
+            throw PersistenceError.malformed("Unsupported catalog model version")
+        }
+        let issues = header.operationModel(episodes: []).validationIssues(expectedSchemaVersion: header.schemaVersion)
         guard issues.isEmpty else { throw PersistenceError.invalidPayload(issues) }
         func unique<T: Hashable>(_ ids: [T]) throws {
             guard Set(ids).count == ids.count else { throw PersistenceError.malformed("Duplicate catalog identity") }
@@ -247,6 +250,9 @@ public struct ShowCatalogDraft: Sendable {
 public struct ShowCatalogCoder: CanonicalDocumentCoding {
     public let format = DocumentFormat.show
     public init() {}
+    private var allowingPreviousModel = false
+
+    init(allowingPreviousModel: Bool) { self.allowingPreviousModel = allowingPreviousModel }
 
     private struct EpisodeEntry: Codable {
         var summary: CatalogEpisodeSummary
@@ -281,12 +287,18 @@ public struct ShowCatalogCoder: CanonicalDocumentCoding {
             let snapshot = try ShowPackage.unframe(data)
             let manifest = try JSONEnvelopeCoder<ShowDocumentModel>.makeDecoder().decode(Manifest.self, from: snapshot.manifest)
             try ShowPackage.requireRecognized(snapshot.manifest, value: manifest)
+            guard allowingPreviousModel || manifest.modelSchemaVersion == SchemaVersion.show else {
+                throw PersistenceError.unsupportedOlderSchema(found: manifest.modelSchemaVersion, minimum: SchemaVersion.show)
+            }
             guard manifest.revision >= 1 else { throw PersistenceError.invalidRevision(manifest.revision) }
             guard try checksum(manifest.index) == manifest.checksum else { throw PersistenceError.checksumMismatch }
             var used: Set<String> = []
             var remaining = 512 * 1_024 * 1_024
             var header = try ShowPackage.decodeComponent(ShowCatalogHeader.self, manifest.index.catalog,
                 snapshot: snapshot, used: &used, remaining: &remaining)
+            guard header.schemaVersion == manifest.modelSchemaVersion else {
+                throw PersistenceError.malformed("Package model version mismatch")
+            }
             if let artwork = manifest.index.artwork {
                 guard header.show.publication != nil, header.show.publication?.artwork == nil else {
                     throw PersistenceError.malformed("Invalid show artwork reference")
@@ -339,6 +351,9 @@ public struct ShowCatalogCoder: CanonicalDocumentCoding {
     public func encodeDocument(_ payload: ShowCatalog, revision: Int, publicationID: UUID) throws(PersistenceError) -> EncodedDocument {
         do {
             guard revision >= 1 else { throw PersistenceError.invalidRevision(revision) }
+            guard payload.header.schemaVersion == SchemaVersion.show else {
+                throw PersistenceError.unsupportedOlderSchema(found: payload.header.schemaVersion, minimum: SchemaVersion.show)
+            }
             try payload.validateIndex()
             var header = payload.header
             var files: [String: Data] = [:]
