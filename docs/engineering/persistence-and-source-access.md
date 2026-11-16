@@ -155,6 +155,12 @@ independently reads it back. Library acknowledgment and rebuildable indexes
 follow successful document publication. A postreplacement failure or uncertain
 acknowledgment is not a verified Saved state.
 
+The document retains its latest save failure for the save-status **Details**
+action, including typed publication diagnostics and a bounded NSError cause
+chain. All windows use that same owner; a verified adopted save clears the
+failure. Showing diagnostics neither retries publication nor overrides native
+or exact-base conflict checks.
+
 Recovery is device-local and keyed by logical ID: validated prior publications
 (last three), unpublished edit checkpoints, conflicts and migration backups
 have distinct roles. They are not cross-device backup guarantees. A damaged

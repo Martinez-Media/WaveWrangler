@@ -109,7 +109,19 @@ originating editor.
 `WWWorkspacesInSeparateWindows` is a device-local opening preference, not a
 document property or automatic migration of already-open views. Each tool
 remembers its native window frame and recovers an unreachable title bar when
-monitors change. Existing windows are focused instead of duplicated.
+monitors change. Existing windows are focused instead of duplicated. Toolbar
+Option-click explicitly requests the inverse placement, including reattaching
+an existing detached tool when separate windows are the default. New requests
+clear pending detached initialization so a canceled request cannot later reopen.
+
+The episode toolbar orders Library, native bottom-workbench toggle group,
+inspector toggle group, Export, then verified save status. Track-header
+components are device-local `ControlBarConfiguration` preferences keyed by the
+existing waveform-layout values. Older configurations retain view-specific
+defaults; invalid layouts/components refuse decoding. Speaker-only headers
+control the speaker's listening scope, with source-specific actions retained
+in the context menu. Hiding components never changes routing, timing, or
+essential availability/listening warnings.
 
 | Seam | Role |
 | --- | --- |

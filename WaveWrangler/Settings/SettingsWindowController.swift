@@ -133,7 +133,7 @@ struct WorkspaceSettingsView: View {
                     .toggleStyle(.switch)
                     .accessibilityIdentifier("ww.settings.workspace.separateWindows")
                 caption("Applies to Review, Mixer, Alignment, and Recordings & Speakers when you open them. Existing windows are focused, not duplicated. Open panels stay where they are when this preference changes.")
-                caption("Option-click a workspace button to open a separate window. Use Reattach to return it to the bottom panel.")
+                caption("Option-click a workspace button to use the opposite placement: bottom panel instead of a separate window, or a separate window instead of the bottom panel.")
             }
             Section("Control bar") {
                 Button("Customize Control Bar and Display…") { ControlBarCustomizationController.show() }

@@ -93,6 +93,24 @@ final class ShowDocument: NSDocument {
     /// Publication of the last coherent value read or verified on disk (`nil` for a new document).
     /// `revision` is only an ordering hint; the publication ID and checksum identify what is on disk.
     private(set) var publication: PublicationStamp?
+    private(set) var lastSaveFailure: (any Error)?
+
+    var saveFailureDetails: String? {
+        guard let lastSaveFailure else { return nil }
+        var lines: [String] = []
+        if let failure = lastSaveFailure as? PublicationError {
+            lines.append(String(describing: failure))
+        }
+        var current: NSError? = lastSaveFailure as NSError
+        for _ in 0..<4 {
+            guard let error = current else { break }
+            lines.append("\(error.domain) (\(error.code)): \(error.localizedDescription)")
+            if let reason = error.localizedFailureReason { lines.append(reason) }
+            if let recovery = error.localizedRecoverySuggestion { lines.append(recovery) }
+            current = error.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+        return lines.joined(separator: "\n\n")
+    }
     /// Exact identity of the bytes this document last read or verified: the expected base for in-place saves.
     private var onDiskBase: RevisionFingerprint?
     /// Only immutable inputs and synchronized results cross AppKit's writing-thread boundary.
@@ -664,6 +682,7 @@ final class ShowDocument: NSDocument {
         saveChangeCount = nil
         writingSnapshot.withLock { $0 = nil }
         if error == nil, adopts, let receipt {
+            lastSaveFailure = nil
             cancelSaveRetry()
             uncertainCandidate = nil
             uncertainRevision = nil
@@ -702,6 +721,7 @@ final class ShowDocument: NSDocument {
             }
             acknowledgeToLibrary(receipt.publication)
         } else if let error {
+            lastSaveFailure = error
             if let publicationError = error as? PublicationError {
                 status.set(DocumentSaveState.from(publicationError, retainedRevision: publication?.revision))
             } else if (error as NSError).domain == NSCocoaErrorDomain, (error as NSError).code == NSUserCancelledError {

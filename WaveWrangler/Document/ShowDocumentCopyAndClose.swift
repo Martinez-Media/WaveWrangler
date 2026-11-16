@@ -22,6 +22,12 @@ extension ShowDocument: DocumentStatusActionHandling {
                 presentFormatUpdatePromptIfNeeded(preferring: window)
             }
             return true
+        case .details:
+            guard let details = saveFailureDetails else { return false }
+            Task { @MainActor in
+                await Dialogs.inform(in: window, message: "Save failure details", informative: details)
+            }
+            return true
         case .showDetails where isAwaitingFormatUpdate:
             if case let .failed(detail) = status.formatUpdate {
                 Task { @MainActor [showFileName] in

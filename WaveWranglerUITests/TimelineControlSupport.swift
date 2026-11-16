@@ -1,6 +1,17 @@
 import XCTest
 
 @MainActor
+func focusEpisodeWorkspace(in app: XCUIApplication) {
+    // AppKit puts the subtitle after an en dash in AX and in parentheses in the Window menu.
+    let title = app.windows["ww.show.window"].title.components(separatedBy: " \u{2013} ")[0]
+    app.menuBars.menuBarItems["Window"].click()
+    let item = app.menuBars.menuItems.matching(NSPredicate(
+        format: "identifier == %@ AND title BEGINSWITH %@", "makeKeyAndOrderFront:", title + " (")).element
+    XCTAssertTrue(item.waitForExistence(timeout: 5), app.debugDescription)
+    item.click()
+}
+
+@MainActor
 func openTimelineMore(in app: XCUIApplication) {
     let overflow = app.scrollViews["ww.controlBar.overflow"]
     if !overflow.exists { app.buttons["ww.controlBar.more"].click() }
@@ -143,12 +154,12 @@ func selectTimelineLayout(_ title: String, in app: XCUIApplication) {
     let option = picker.menuItems[title]
     XCTAssertTrue(option.waitForExistence(timeout: 3), app.debugDescription)
     option.click()
-    if picker.exists {
-        XCTAssertEqual(picker.value as? String, title)
-    } else {
+    let updated = app.popUpButtons["alignment.waveforms.layout"]
+    if !updated.exists || !updated.isHittable {
         openTimelineMore(in: app)
-        XCTAssertEqual(app.scrollViews["ww.controlBar.overflow"]
-            .popUpButtons["alignment.waveforms.layout"].value as? String, title)
     }
+    let selected = app.popUpButtons["alignment.waveforms.layout"]
+    XCTAssertTrue(selected.waitForExistence(timeout: 5))
+    XCTAssertEqual(selected.value as? String, title)
     closeTimelineMore(in: app)
 }

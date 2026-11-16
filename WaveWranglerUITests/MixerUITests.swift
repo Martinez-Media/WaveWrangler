@@ -101,6 +101,7 @@ final class MixerUITests: XCTestCase {
             XCTAssertTrue(window.waitForExistence(timeout: 5), app.debugDescription)
             XCTAssertFalse(docked.exists)
             XCTAssertFalse(hide.exists, "Option-click from hidden must not open the bottom pane.")
+            focusEpisodeWorkspace(in: app)
             XCUIElement.perform(withKeyModifiers: .option) { toggle.click() }
             XCTAssertEqual(app.windows.matching(identifier: "ww.\(panel).window").count, 1)
             XCTAssertFalse(hide.exists, "Refocusing a detached window must not open the bottom pane.")
@@ -111,6 +112,7 @@ final class MixerUITests: XCTestCase {
             XCUIElement.perform(withKeyModifiers: .option) { toggle.click() }
             XCTAssertTrue(window.waitForExistence(timeout: 5))
             XCTAssertFalse(docked.exists, "Option-click also detaches an already-docked panel.")
+            focusEpisodeWorkspace(in: app)
             toggle.click()
             XCTAssertTrue(window.exists, "An ordinary click retains the detached window.")
             XCTAssertEqual(app.windows.matching(identifier: "ww.\(panel).window").count, 1)

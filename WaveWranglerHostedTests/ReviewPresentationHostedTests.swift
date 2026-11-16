@@ -248,6 +248,81 @@ struct ReviewPresentationHostedTests {
         #expect(!state.workspaceIsDetached(.alignment))
     }
 
+    @Test func alternatePlacementInvertsTheDefaultForEveryWorkbench() async throws {
+        let (f, cleanup, state) = try await ReviewPanelHostedTests().fixture()
+        defer { cleanup.cancel(); f.close() }
+        let owner = EpisodeWindowController(state: state)
+        f.document.addWindowController(owner)
+        owner.showWindow(nil)
+        let settings = AppSettings.shared
+        let original = settings.workspacesInSeparateWindows
+        defer { settings.workspacesInSeparateWindows = original; owner.close() }
+        let before = f.document.store.residentModel
+        for content in EpisodeBottomPaneContent.allCases {
+            settings.workspacesInSeparateWindows = false
+            state.openWorkspace(content, separateWindow: false)
+            state.toggleWorkspace(content, alternatePlacement: true)
+            let detachedFromDockedDefault = state.workspaceIsDetached(content)
+            #expect(detachedFromDockedDefault)
+            settings.workspacesInSeparateWindows = true
+            state.toggleWorkspace(content, alternatePlacement: true)
+            let reattached = !state.workspaceIsDetached(content)
+            let docked = state.bottomPanePresented && state.bottomPaneContent == content
+            #expect(reattached && docked)
+            state.toggleWorkspace(content)
+            let detachedByDefault = state.workspaceIsDetached(content)
+            #expect(detachedByDefault)
+            state.toggleWorkspace(content)
+            let stillDetached = state.workspaceIsDetached(content)
+            #expect(stillDetached)
+            state.reattachWorkspace(content)
+        }
+        let unchanged = f.document.store.residentModel == before
+        let sharedModels = state.alignmentModel === f.model && state.cleanupModel === cleanup
+        #expect(unchanged && sharedModels)
+    }
+
+    @Test func nativeToolbarSegmentsDispatchWhileAnotherWorkbenchIsDetached() async throws {
+        let (f, cleanup, state) = try await ReviewPanelHostedTests().fixture()
+        defer { cleanup.cancel(); f.close() }
+        let owner = EpisodeWindowController(state: state)
+        f.document.addWindowController(owner)
+        owner.showWindow(nil)
+        defer { owner.close() }
+        let settings = AppSettings.shared
+        let original = settings.workspacesInSeparateWindows
+        settings.workspacesInSeparateWindows = false
+        defer { settings.workspacesInSeparateWindows = original }
+        try await settle()
+        func segments(in view: NSView) -> [NSSegmentedControl] {
+            if let control = view as? NSSegmentedControl { return [control] }
+            return view.subviews.flatMap { segments(in: $0) }
+        }
+        let root = try #require(owner.window?.contentView?.superview)
+        let control = try #require(segments(in: root).first { $0.segmentCount == 4 })
+        let connected = control.target != nil && control.action != nil
+        #expect(connected)
+        let reviewIndex = try #require(EpisodeBottomPaneContent.allCases.firstIndex(of: .review))
+        let mixerIndex = try #require(EpisodeBottomPaneContent.allCases.firstIndex(of: .mixer))
+        state.detachWorkspace(.review)
+        try await settle()
+        control.selectedSegment = mixerIndex
+        guard let action = control.action else {
+            Issue.record("The native toolbar lost its target/action connection.")
+            return
+        }
+        let actionName = NSStringFromSelector(action)
+        #expect(actionName == "segmentChanged:")
+        let dispatched = control.sendAction(action, to: control.target)
+        try await settle()
+        #expect(dispatched)
+        let reviewDetached = state.workspaceIsDetached(.review)
+        let mixerDocked = state.bottomPanePresented && state.bottomPaneContent == .mixer
+        #expect(reviewDetached && mixerDocked)
+        let selected = control.isSelected(forSegment: reviewIndex) && control.isSelected(forSegment: mixerIndex)
+        #expect(selected)
+    }
+
     @Test func reviewSelectionDoesNotOpenHiddenInspectorOrReplaceEpisodeContext() async throws {
         let (f, cleanup, state) = try await ReviewPanelHostedTests().fixture()
         defer { cleanup.cancel(); f.close() }

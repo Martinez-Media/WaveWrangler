@@ -12,11 +12,14 @@ Switching modes stops the current audition; selecting a mode does not start it.
 Choose **View > Show Mixer** or the mixer control in the workspace.
 Review, Mixer, Alignment, and Recordings & Speakers share the resizable bottom pane. **Detach mixer** or
 **View > Pop Out Mixer** opens a native mixer window; **Reattach** returns it
-to the editor. Option-clicking the toolbar's Mixer control also detaches it.
+to the editor. Option-clicking the toolbar's Mixer control uses the opposite
+of the default placement.
 
 In **Settings > Workspace**, enable **Open workspaces in separate windows**
 to use separate windows by default. Opening an existing window focuses it rather
-than creating another. Changing the preference leaves open panels where they are.
+than creating another. Option-click docks the mixer when separate windows are
+the default, and detaches it when docking is the default. Changing the preference
+leaves open panels where they are.
 
 Each editor owns its mixer window and transport binding. Opening the mixer does
 not start playback or change source-listening choices. Closing its originating

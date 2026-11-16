@@ -10,13 +10,20 @@ import WWPersistence
 @MainActor
 @Suite("Demand-driven native show catalogs", .serialized)
 struct LazyCatalogHostedTests {
-    private func fixture() throws -> (ShowDocument, URL, ShowDocumentModel) {
+    private func fixture(nativeOpen: Bool = false) throws -> (ShowDocument, URL, ShowDocumentModel) {
         let root = FileManager.default.temporaryDirectory.appending(path: "LazyCatalog-\(UUID())")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
         let model = ShowDocumentModel(show: Show(title: "Generated catalog"),
             episodes: (1...3).map { (number: Int) in Episode(title: "Episode \(number)", number: number) })
         let url = root.appending(path: "Generated.wwshow")
         try LocalFileOperations().writeNew(ShowCatalogCoder().encode(ShowCatalog(model), revision: 1), to: url)
+        if nativeOpen {
+            let document = try #require(NSDocumentController.shared.makeDocument(
+                withContentsOf: url, ofType: DocumentTypes.show) as? ShowDocument)
+            document.undoManager?.groupsByEvent = false
+            NSDocumentController.shared.addDocument(document)
+            return (document, root, model)
+        }
         return (try open(url), root, model)
     }
 
@@ -71,6 +78,66 @@ struct LazyCatalogHostedTests {
         expected.show.title = "Catalog-only edit"
         let matches = try after.materializedModel() == expected
         #expect(matches)
+    }
+
+    @Test func metadataOnlyPackageChangesAllowRepeatedVerifiedSaves() async throws {
+        let (document, root, _) = try fixture(nativeOpen: true)
+        defer { do { try finish(document, root: root) } catch { Issue.record(error) } }
+        let url = try #require(document.fileURL)
+        for operation in [NSDocument.SaveOperationType.saveOperation, .autosaveInPlaceOperation] {
+            let original = try LocalFileOperations().read(url)
+            let originalDate = try #require(document.fileModificationDate)
+            try #require(document.store.apply("Rename Show") { model throws(DomainError) in
+                try model.renamingShow(to: "Metadata-only change \(operation.rawValue)")
+            })
+            try FileManager.default.setAttributes(
+                [.modificationDate: originalDate.addingTimeInterval(30)], ofItemAtPath: url.path)
+            let replacement = root.appending(path: "Provider replacement.wwshow")
+            try LocalFileOperations().writeNew(original, to: replacement)
+            try LocalFileOperations().replace(url, withStaged: replacement)
+            #expect(try LocalFileOperations().read(url) == original)
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                document.save(to: url, ofType: DocumentTypes.show, for: operation) { error in
+                    if let error { continuation.resume(throwing: error) }
+                    else { continuation.resume() }
+                }
+            }
+            let saved = try ShowCatalogCoder().decode(LocalFileOperations().read(url))
+            let title = saved.payload.header.show.title
+            let verified = document.status.saveStatus.state.isVerifiedOnDisk
+            #expect(title == "Metadata-only change \(operation.rawValue)")
+            #expect(verified)
+        }
+    }
+
+    @Test func externallyChangedPackageIsNeverOverwrittenByRetry() async throws {
+        let (document, root, original) = try fixture(nativeOpen: true)
+        defer { do { try finish(document, root: root) } catch { Issue.record(error) } }
+        let url = try #require(document.fileURL)
+        try #require(document.store.apply("Rename Show") { model throws(DomainError) in
+            try model.renamingShow(to: "Unsaved local draft")
+        })
+        let competing = try ShowCatalog(original.renamingShow(to: "External writer"))
+        let bytes = try ShowCatalogCoder().encode(competing, revision: 2)
+        let staged = root.appending(path: "External.wwshow")
+        try LocalFileOperations().writeNew(bytes, to: staged)
+        try LocalFileOperations().replace(url, withStaged: staged)
+        do {
+            try await save(document)
+            Issue.record("An externally changed publication must be refused.")
+        } catch {
+            #expect((error as NSError).code != NSUserCancelledError)
+            let details = try #require(document.saveFailureDetails)
+            #expect(details.contains((error as NSError).domain))
+            if let failure = error as? PublicationError {
+                #expect(details.contains(String(describing: failure)))
+            }
+        }
+        #expect(try LocalFileOperations().read(url) == bytes)
+        let draftTitle = document.store.header.show.title
+        let edited = document.isDocumentEdited
+        #expect(draftTitle == "Unsaved local draft")
+        #expect(edited)
     }
 
     @Test func sharedWindowPinsAndArchivedUndoDoNotRetainVisitedPayloads() async throws {

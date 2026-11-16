@@ -31,7 +31,10 @@ recovery work so **Don't Save** finishes discarding unsaved checkpoints.
 
 ## When a save fails
 
-Keep the document open and inspect the status action.
+Keep the document open and inspect the status action. **Details** for a failed
+save shows its error domain, code, available underlying cause, and recovery
+guidance. It does not retry or overwrite anything. A cloud-provider name or
+changed timestamp alone does not establish whether the show contents changed.
 With macOS **Keyboard navigation** enabled, use **Tab** to reach persistent
 recovery actions and **Space** to activate them.
 

@@ -6,25 +6,20 @@ struct WorkspaceBottomPaneToggles: View {
     @Bindable var state: ShowWindowState
 
     var body: some View {
-        HStack(spacing: 2) {
-            ForEach(EpisodeBottomPaneContent.allCases, id: \.self) { content in
-            Button {
-                state.toggleWorkspace(content, separateWindow: NSEvent.modifierFlags.contains(.option))
-            } label: {
-                Image(systemName: content.symbol)
-                    .frame(width: 24, height: 24)
-                    .background((state.bottomPanePresented && state.bottomPaneContent == content) || state.workspaceIsDetached(content)
-                                ? Color.accentColor.opacity(0.2) : .clear,
-                                in: RoundedRectangle(cornerRadius: 5))
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(content.rawValue)
-            .accessibilityValue(state.workspaceIsDetached(content) ? "In separate window"
-                : state.bottomPanePresented && state.bottomPaneContent == content ? "Shown" : "Hidden")
-            .accessibilityIdentifier(content == .recordings ? "ww.show.recordings" : "ww.\(content.rawValue.lowercased()).toggle")
-            .help("Show or focus \(content.rawValue). Option-click to open a separate window.")
-            }
+        WorkspaceToolbarSegments(items: EpisodeBottomPaneContent.allCases.map { content in
+            let detached = state.workspaceIsDetached(content)
+            let shown = state.bottomPanePresented && state.bottomPaneContent == content
+            return .init(
+                id: content == .recordings ? "ww.show.recordings" : "ww.\(content.rawValue.lowercased()).toggle",
+                title: content.rawValue, symbol: content.symbol, selected: detached || shown,
+                value: detached ? "In separate window" : shown ? "Shown" : "Hidden",
+                help: "Show or focus \(content.rawValue). Option-click to "
+                    + (AppSettings.shared.workspacesInSeparateWindows ? "open in the bottom panel." : "open a separate window."))
+        }) { index in
+            state.toggleWorkspace(EpisodeBottomPaneContent.allCases[index],
+                                  alternatePlacement: NSEvent.modifierFlags.contains(.option))
         }
+        .padding(.horizontal, 6)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Bottom panes")
     }
@@ -35,27 +30,94 @@ struct WorkspaceInspectorToggles: View {
     private let activities: [ShowWindowState.WorkspaceInspector] = [.recording, .episode]
 
     var body: some View {
-        HStack(spacing: 2) {
-            ForEach(activities, id: \.self) { activity in
-                let active = state.inspectorPresented && state.workspaceInspector == activity
-                Button {
-                    state.toggleWorkspaceInspector(activity)
-                } label: {
-                    Image(systemName: activity.symbol)
-                        .frame(width: 24, height: 24)
-                        .background(active ? Color.accentColor.opacity(0.2) : .clear,
-                                    in: RoundedRectangle(cornerRadius: 5))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("\(activity.title) inspector")
-                .accessibilityValue(active ? "Shown" : "Hidden")
-                .accessibilityAddTraits(active ? [.isSelected] : [])
-                .accessibilityIdentifier("ww.sidebar.\(activity.identifier)")
-                .help("\(active ? "Hide" : "Show") \(activity.title) inspector")
-            }
+        WorkspaceToolbarSegments(items: activities.map { activity in
+            let active = state.inspectorPresented && state.workspaceInspector == activity
+            return .init(id: "ww.sidebar.\(activity.identifier)", title: "\(activity.title) inspector",
+                         symbol: activity.symbol, selected: active, value: active ? "Shown" : "Hidden",
+                         help: "\(active ? "Hide" : "Show") \(activity.title) inspector")
+        }) { index in
+            state.toggleWorkspaceInspector(activities[index])
         }
+        .padding(.horizontal, 6)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Sidebar activities")
+    }
+}
+
+private struct WorkspaceToolbarSegments: View {
+    struct Item: Identifiable {
+        let id: String
+        let title: String
+        let symbol: String
+        let selected: Bool
+        let value: String
+        let help: String
+    }
+
+    let items: [Item]
+    let activate: (Int) -> Void
+
+    var body: some View {
+        NativeControl(owner: self)
+            .fixedSize()
+            // Preserve explicit action names and detached-window values for each native segment.
+            .accessibilityRepresentation {
+                HStack(spacing: 0) {
+                    ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                        Button(item.title) { activate(index) }
+                            .frame(width: 32, height: 32)
+                            .accessibilityValue(item.value)
+                            .accessibilityAddTraits(item.selected ? [.isSelected] : [])
+                            .accessibilityIdentifier(item.id)
+                            .help(item.help)
+                    }
+                }
+            }
+    }
+
+    private struct NativeControl: NSViewRepresentable {
+        let owner: WorkspaceToolbarSegments
+
+        func makeCoordinator() -> Coordinator { Coordinator(owner) }
+
+        func makeNSView(context: Context) -> NSSegmentedControl {
+            let control = NSSegmentedControl()
+            control.trackingMode = .selectAny
+            control.segmentStyle = .automatic
+            control.controlSize = .large
+            control.target = context.coordinator
+            control.action = #selector(Coordinator.segmentChanged(_:))
+            return control
+        }
+
+        func updateNSView(_ control: NSSegmentedControl, context: Context) {
+            context.coordinator.owner = owner
+            control.target = context.coordinator
+            control.action = #selector(Coordinator.segmentChanged(_:))
+            if control.segmentCount != owner.items.count { control.segmentCount = owner.items.count }
+            for (index, item) in owner.items.enumerated() {
+                let image = NSImage(systemSymbolName: item.symbol, accessibilityDescription: item.title)?
+                    .withSymbolConfiguration(.init(pointSize: 18, weight: .regular))
+                control.setImage(image, forSegment: index)
+                control.setWidth(32, forSegment: index)
+                control.setSelected(item.selected, forSegment: index)
+                control.setToolTip(item.help, forSegment: index)
+            }
+        }
+    }
+
+    final class Coordinator: NSObject {
+        var owner: WorkspaceToolbarSegments
+        init(_ owner: WorkspaceToolbarSegments) { self.owner = owner }
+
+        @objc func segmentChanged(_ sender: NSSegmentedControl) {
+            let index = sender.selectedSegment
+            guard owner.items.indices.contains(index) else { return }
+            owner.activate(index)
+            for (index, item) in owner.items.enumerated() {
+                sender.setSelected(item.selected, forSegment: index)
+            }
+        }
     }
 }
 

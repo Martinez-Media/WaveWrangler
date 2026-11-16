@@ -78,6 +78,8 @@ struct ControlBarSettingsTests {
         let first = AppSettings(defaults: defaults)
         first.controlBar = .preset(.review)
         first.controlBar.primaryClock = .timeline
+        first.controlBar.setHeaderComponent(.recordingNames, shown: true, in: .speakersOnly)
+        first.controlBar.setHeaderComponent(.timing, shown: false, in: .speaker)
         let second = AppSettings(defaults: defaults)
         #expect(second.controlBar == first.controlBar)
         first.controlBar.showsLabels = false
@@ -91,6 +93,24 @@ struct ControlBarSettingsTests {
         #expect(invalid.controlBarError == nil)
         #expect(invalid.controlBar == ControlBarConfiguration())
         #expect(AppSettings(defaults: defaults).controlBar == ControlBarConfiguration())
+    }
+
+    @Test func trackHeadersKeepViewSpecificDefaultsAndRejectInapplicableComponents() throws {
+        var value = ControlBarConfiguration()
+        #expect(value.headerComponents(in: .speakersOnly) == [.listening, .images])
+        #expect(value.headerComponents(in: .recorderGroup).contains(.timing))
+        value.setHeaderComponent(.recordingNames, shown: true, in: .speakersOnly)
+        value.setHeaderComponent(.timing, shown: false, in: .speaker)
+        let restored = try JSONDecoder().decode(ControlBarConfiguration.self, from: JSONEncoder().encode(value))
+        #expect(restored == value)
+        #expect(restored.headerComponents(in: .speakersOnly).contains(.recordingNames))
+        #expect(!restored.headerComponents(in: .speaker).contains(.timing))
+        #expect(restored.headerComponents(in: .recorderGroup).contains(.timing))
+        value.setHeaderComponent(.timing, shown: true, in: .speakersOnly)
+        #expect(!value.isValid)
+        #expect(throws: (any Error).self) {
+            try JSONDecoder().decode(ControlBarConfiguration.self, from: JSONEncoder().encode(value))
+        }
     }
 
     @Test func clockFormattingAndParsingRemainSignedFiniteAndBounded() throws {

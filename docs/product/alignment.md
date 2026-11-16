@@ -8,8 +8,10 @@ rewrite the original media, and analysis never accepts its own proposal.
 ## Before analyzing
 
 **Alignment** and **Recordings & Speakers** are nonmodal working views in the
-resizable bottom panel. Use the workspace buttons or bottom tabs to switch tools,
-or Option-click a workspace button to open a separate window. **Reattach**
+resizable bottom panel. Use the workspace buttons or bottom tabs to switch tools.
+Option-click uses the opposite of **Settings > Workspace > Open workspaces in
+separate windows**: detach when docking is the default, or dock when separate
+windows are the default. **Reattach**
 returns the tool to the editor. The right inspector contains **Selection**
 details or **Episode** metadata; opening a working view does not open the inspector.
 
@@ -80,6 +82,20 @@ Use **By recorder**, **By speaker**, **Overlay**, or **Speakers only** to inspec
 the same timing in different layouts. **Normalize view** changes displayed peak
 scale only. **Fit timeline**, zoom, and lane-height controls help reveal details;
 **Follow Playhead** pages the visible timeline during playback.
+
+Track headers follow the selected view. **By recorder** exposes recorder-group
+controls; **By speaker** keeps speaker and explicitly labeled recording
+Solo/Mute controls separate; **Overlay** keeps recording controls beside the
+compared sources. **Speakers only** uses speaker-level Solo/Mute and hides
+repeated filenames, assignments, and alignment controls by default. Right-click
+that header for recording-specific Solo/Mute, **Recording Details**, or
+**Show Alignment**.
+
+Right-click a header and choose **Track Header Components**, or use
+**Customize Control Bar and Display > Track headers**, to choose components
+independently for each view. These preferences apply on this Mac, not to the
+show's audio or other users. Availability/listening warnings remain visible;
+alignment and position controls stay out of **Speakers only**.
 
 Source listening choices control diagnostic audition, not the production mix.
 Solo an untimed recording to hear its **original source time**, without cuts or

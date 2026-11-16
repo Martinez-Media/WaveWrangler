@@ -88,17 +88,6 @@ private struct ShowWindowContent: View {
             }
             ToolbarSpacer(.fixed, placement: .primaryAction)
             }
-            ToolbarItem(placement: .primaryAction) {
-                Button("Export", systemImage: "square.and.arrow.up") { state.requestExport() }
-                    .disabled(state.exportUnavailableReason != nil)
-                    .help(state.exportUnavailableReason ?? "Export this whole episode (⌘4)")
-                    .accessibilityIdentifier("ww.show.export")
-            }
-            ToolbarSpacer(.fixed, placement: .primaryAction)
-            ToolbarItem(placement: .primaryAction) {
-                SaveStatusItem(state: state)
-            }
-            ToolbarSpacer(.fixed, placement: .primaryAction)
             if state.destination == .alignment, state.selectedEpisode != nil {
                 ToolbarItem(placement: .primaryAction) {
                     WorkspaceBottomPaneToggles(state: state)
@@ -116,6 +105,17 @@ private struct ShowWindowContent: View {
                     }
                     .help(state.inspectorPresented ? "Hide Inspector (⌃⌘I)" : "Show Inspector (⌃⌘I)")
                 }
+            }
+            ToolbarSpacer(.fixed, placement: .primaryAction)
+            ToolbarItem(placement: .primaryAction) {
+                Button("Export", systemImage: "square.and.arrow.up") { state.requestExport() }
+                    .disabled(state.exportUnavailableReason != nil)
+                    .help(state.exportUnavailableReason ?? "Export this whole episode (⌘4)")
+                    .accessibilityIdentifier("ww.show.export")
+            }
+            ToolbarSpacer(.fixed, placement: .primaryAction)
+            ToolbarItem(placement: .primaryAction) {
+                SaveStatusItem(state: state)
             }
         }
         // The NSWindow owns the complete 760×440 minimum. A content-driven minimum here is only for

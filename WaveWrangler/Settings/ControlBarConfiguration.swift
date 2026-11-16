@@ -64,6 +64,28 @@ struct ControlBarConfiguration: Codable, Equatable {
         case editing = "Editing", review = "Review", mixing = "Mixing"
     }
 
+    enum HeaderComponent: String, Codable, CaseIterable {
+        case listening, images, recordingNames, assignments, timing
+
+        var title: String {
+            switch self {
+            case .listening: "Solo and Mute"
+            case .images: "Speaker and recorder images"
+            case .recordingNames: "Recording names"
+            case .assignments: "Speaker assignments and recording roles"
+            case .timing: "Alignment and position controls"
+            }
+        }
+
+        static func available(in layout: AlignmentWaveformLayout) -> [Self] {
+            allCases.filter { layout != .speakersOnly || $0 != .timing }
+        }
+
+        static func defaults(in layout: AlignmentWaveformLayout) -> Set<Self> {
+            layout == .speakersOnly ? [.listening, .images] : Set(available(in: layout))
+        }
+    }
+
     var version = 2
     var groups: [Group] = [.view, .episode, .tools]
     var controls: Set<Control> = [.boundaries, .primaryTool, .commandTool, .zoom, .height, .layout, .fit]
@@ -71,10 +93,25 @@ struct ControlBarConfiguration: Codable, Equatable {
     var primaryClock = EpisodeClock.episode
     var secondaryClock: EpisodeClock?
     var readout = Readout.none
+    var trackHeaders: [String: Set<HeaderComponent>] = [:]
+
+    func headerComponents(in layout: AlignmentWaveformLayout) -> Set<HeaderComponent> {
+        trackHeaders[layout.rawValue] ?? HeaderComponent.defaults(in: layout)
+    }
+
+    mutating func setHeaderComponent(_ component: HeaderComponent, shown: Bool, in layout: AlignmentWaveformLayout) {
+        var selected = headerComponents(in: layout)
+        if shown { selected.insert(component) } else { selected.remove(component) }
+        trackHeaders[layout.rawValue] = selected
+    }
 
     var isValid: Bool {
         version == 2 && groups.count == Group.allCases.count && Set(groups) == Set(Group.allCases)
             && controls.isSubset(of: Set(Control.allCases))
+            && trackHeaders.allSatisfy { key, components in
+                guard let layout = AlignmentWaveformLayout(rawValue: key) else { return false }
+                return components.isSubset(of: Set(HeaderComponent.available(in: layout)))
+            }
     }
 
     static func preset(_ preset: Preset) -> Self {
@@ -110,7 +147,7 @@ struct ControlBarConfiguration: Codable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case version, groups, visible, controls, showsLabels, primaryClock, secondaryClock, readout
+        case version, groups, visible, controls, showsLabels, primaryClock, secondaryClock, readout, trackHeaders
     }
 
     init() {}
@@ -127,6 +164,7 @@ struct ControlBarConfiguration: Codable, Equatable {
         primaryClock = try container.decode(EpisodeClock.self, forKey: .primaryClock)
         secondaryClock = try container.decodeIfPresent(EpisodeClock.self, forKey: .secondaryClock)
         readout = try container.decode(Readout.self, forKey: .readout)
+        trackHeaders = try container.decodeIfPresent([String: Set<HeaderComponent>].self, forKey: .trackHeaders) ?? [:]
         if savedVersion == 1 {
             let visible = try container.decode(Set<Group>.self, forKey: .visible)
             controls = Set(Control.allCases.filter {
@@ -150,5 +188,6 @@ struct ControlBarConfiguration: Codable, Equatable {
         try container.encode(primaryClock, forKey: .primaryClock)
         try container.encodeIfPresent(secondaryClock, forKey: .secondaryClock)
         try container.encode(readout, forKey: .readout)
+        if !trackHeaders.isEmpty { try container.encode(trackHeaders, forKey: .trackHeaders) }
     }
 }

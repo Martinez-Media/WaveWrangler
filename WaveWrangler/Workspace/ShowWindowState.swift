@@ -112,6 +112,7 @@ final class ShowWindowState {
     func openWorkspace(_ content: EpisodeBottomPaneContent, separateWindow: Bool? = nil) {
         guard selectedEpisodeID != nil else { return }
         let detached = separateWindow ?? AppSettings.shared.workspacesInSeparateWindows
+        pendingSeparateWorkspace = nil
         select(.alignment)
         if detached && (content == .review || content == .mixer) && cleanupModel == nil {
             pendingSeparateWorkspace = content
@@ -125,8 +126,12 @@ final class ShowWindowState {
         }
     }
 
-    func toggleWorkspace(_ content: EpisodeBottomPaneContent, separateWindow: Bool = false) {
-        if separateWindow || AppSettings.shared.workspacesInSeparateWindows || workspaceIsDetached(content) {
+    func toggleWorkspace(_ content: EpisodeBottomPaneContent, alternatePlacement: Bool = false) {
+        pendingSeparateWorkspace = nil
+        let separateWindow = AppSettings.shared.workspacesInSeparateWindows != alternatePlacement
+        if alternatePlacement && !separateWindow && workspaceIsDetached(content) {
+            reattachWorkspace(content)
+        } else if separateWindow || workspaceIsDetached(content) {
             openWorkspace(content, separateWindow: true)
         } else if bottomPanePresented && bottomPaneContent == content {
             bottomPanePresented = false

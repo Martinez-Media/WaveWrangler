@@ -42,6 +42,7 @@ final class ControlBarCustomizationController: NSWindowController {
 private struct ControlBarCustomization: View {
     @Bindable var settings: AppSettings
     let contentHeight: CGFloat
+    @State private var headerLayout = AlignmentWaveformLayout.defaultValue
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -98,6 +99,25 @@ private struct ControlBarCustomization: View {
                     Picker("Additional readout", selection: $settings.controlBar.readout) {
                         ForEach(ControlBarConfiguration.Readout.allCases, id: \.self) { Text($0.title).tag($0) }
                     }
+                }
+                Section("Track headers") {
+                    Picker("Track view", selection: $headerLayout) {
+                        ForEach(AlignmentWaveformLayout.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                    }
+                    ForEach(ControlBarConfiguration.HeaderComponent.available(in: headerLayout), id: \.self) { component in
+                        Toggle(component.title, isOn: Binding(
+                            get: { settings.controlBar.headerComponents(in: headerLayout).contains(component) },
+                            set: { settings.controlBar.setHeaderComponent(component, shown: $0, in: headerLayout) }
+                        ))
+                        .toggleStyle(.checkbox)
+                        .accessibilityIdentifier("ww.trackHeaders.\(component.rawValue)")
+                    }
+                    Button("Restore This View's Header") {
+                        settings.controlBar.trackHeaders.removeValue(forKey: headerLayout.rawValue)
+                    }
+                    Text("Each track view has its own layout. Essential availability and listening warnings remain visible. You can also right-click a track header to customize it.")
+                        .wwFont(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
             .formStyle(.grouped)

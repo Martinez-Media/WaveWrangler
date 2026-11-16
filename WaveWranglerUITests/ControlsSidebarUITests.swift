@@ -2,6 +2,95 @@ import XCTest
 
 @MainActor
 final class ControlsSidebarUITests: XCTestCase {
+    func testToolbarOrderAndSpeakerSpecificHeaderComponents() {
+        let app = launch(singlePrimary: true)
+        defer { app.terminate() }
+        let main = app.windows["ww.show.window"]
+        XCTAssertTrue(main.waitForExistence(timeout: 20))
+        let identifiers = ["ww.show.library", "ww.review.toggle", "ww.mixer.toggle",
+                           "ww.show.recordings", "ww.alignment.toggle", "ww.sidebar.recording",
+                           "ww.sidebar.episode", "ww.show.export", "ww.show.saveStatus"]
+        let controls = identifiers.map { main.buttons[$0] }
+        for control in controls { XCTAssertTrue(control.isHittable, control.debugDescription) }
+        for index in 1..<controls.count {
+            XCTAssertGreaterThan(controls[index].frame.midX, controls[index - 1].frame.midX,
+                                 "Toolbar groups follow Library, bottom panes, inspectors, Export, Saved.")
+        }
+        selectTimelineLayout("Speakers only", in: app)
+        let speakerSolo = main.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'ww.listening.solo.speaker.'")).firstMatch
+        let sourceSolo = main.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'ww.listening.solo.source.'")).firstMatch
+        XCTAssertTrue(speakerSolo.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertFalse(sourceSolo.exists, "Speaker view must not duplicate speaker and recording Solo controls.")
+        let heading = main.staticTexts.matching(NSPredicate(
+            format: "identifier BEGINSWITH 'alignment.waveforms.speakerHeading.'")).firstMatch
+        XCTAssertTrue(heading.exists)
+        heading.click()
+        heading.rightClick()
+        app.menuItems["Track Header Components"].click()
+        let names = app.menuItems["Recording names"]
+        XCTAssertTrue(names.waitForExistence(timeout: 3))
+        XCTAssertFalse(app.menuItems["Alignment and position controls"].exists)
+        names.click()
+        let recordingName = main.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH 'alignment.waveforms.select.'")).firstMatch
+        XCTAssertTrue(recordingName.waitForExistence(timeout: 5))
+        selectTimelineLayout("By speaker", in: app)
+        XCTAssertTrue(sourceSolo.waitForExistence(timeout: 5))
+        selectTimelineLayout("Speakers only", in: app)
+        XCTAssertTrue(recordingName.waitForExistence(timeout: 5), "Header choices are retained independently per view.")
+        heading.rightClick()
+        app.menuItems["Track Header Components"].click()
+        app.menuItems["Restore This View's Header"].click()
+        XCTAssertTrue(wait { !recordingName.exists })
+        for layout in ["By recorder", "Overlay", "By speaker", "Speakers only"] {
+            selectTimelineLayout(layout, in: app)
+            XCTAssertTrue(wait { layout == "Speakers only" ? !sourceSolo.exists : sourceSolo.exists })
+            if layout == "Speakers only" {
+                XCTAssertFalse(main.buttons.matching(NSPredicate(
+                    format: "identifier BEGINSWITH 'alignment.waveforms.positionLock.'")).firstMatch.exists)
+            }
+            let attachment = XCTAttachment(screenshot: main.screenshot())
+            attachment.name = "Native toolbar and track headers - \(layout)"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+    }
+
+    func testOptionClickDocksWhenSeparateWindowsAreDefault() throws {
+        let app = launch(singlePrimary: true)
+        defer { app.terminate() }
+        let main = app.windows["ww.show.window"]
+        XCTAssertTrue(main.waitForExistence(timeout: 20))
+        app.typeKey(",", modifierFlags: .command)
+        let settings = app.windows["ww.settings.window"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 5))
+        settings.toolbars.buttons["Workspace"].click()
+        let preference = settings.descendants(matching: .any)["ww.settings.workspace.separateWindows"]
+        XCTAssertTrue(preference.waitForExistence(timeout: 5))
+        if !((try XCTUnwrap(preference.value as? NSNumber)).boolValue) { preference.click() }
+        XCTAssertTrue((try XCTUnwrap(preference.value as? NSNumber)).boolValue)
+        settings.typeKey("w", modifierFlags: .command)
+        main.click()
+        for (identifier, windowID) in [
+            ("ww.show.recordings", "ww.workbench.recordings.window"),
+            ("ww.alignment.toggle", "ww.workbench.alignment.window"),
+            ("ww.review.toggle", "ww.review.window"),
+            ("ww.mixer.toggle", "ww.mixer.window")
+        ] {
+            let toggle = main.buttons[identifier]
+            XCTAssertTrue(toggle.isHittable)
+            toggle.click()
+            XCTAssertTrue(wait { toggle.value as? String == "In separate window" }, app.debugDescription)
+            let detached = app.windows[windowID]
+            focusEpisodeWorkspace(in: app)
+            XCUIElement.perform(withKeyModifiers: .option) { toggle.click() }
+            XCTAssertTrue(wait { toggle.value as? String == "Shown" }, app.debugDescription)
+            XCTAssertFalse(detached.exists && detached.isHittable)
+            XCTAssertTrue(main.buttons["ww.bottomPane.hide"].isHittable)
+            main.buttons["ww.bottomPane.hide"].click()
+        }
+    }
+
     func testFillerWordsConfigureDefaultsAndShowOverrideWithoutImplicitCuts() {
         let app = launch(singlePrimary: true)
         defer { app.terminate() }
