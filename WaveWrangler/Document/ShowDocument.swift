@@ -113,6 +113,7 @@ final class ShowDocument: NSDocument {
     }
     /// Exact identity of the bytes this document last read or verified: the expected base for in-place saves.
     private var onDiskBase: RevisionFingerprint?
+    private var nativeSaveBaseURL: URL?
     /// Only immutable inputs and synchronized results cross AppKit's writing-thread boundary.
     nonisolated private let writingSnapshot = Mutex<ShowSaveSnapshot?>(nil)
     private var saveChangeCount: (token: Any, operation: NSDocument.SaveOperationType)?
@@ -374,6 +375,7 @@ final class ShowDocument: NSDocument {
             Self.debugBeforeRead?(url)
             #endif
             try load(data, url: url)
+            nativeSaveBaseURL = url.standardizedFileURL
         }
         if ShowPackage.isSnapshot(data) {
             try packageWrapper.withLock { $0 = try ShowPackage.fileWrapper(for: data) }
@@ -382,7 +384,10 @@ final class ShowDocument: NSDocument {
         }
     }
     override func read(from data: Data, ofType typeName: String) throws {
-        try MainActor.assumeIsolated { try load(data, url: nil) }
+        try MainActor.assumeIsolated {
+            try load(data, url: nil)
+            nativeSaveBaseURL = nil
+        }
     }
 
     private func load(_ data: Data, url: URL?) throws {
@@ -527,6 +532,19 @@ final class ShowDocument: NSDocument {
             prior = wrapper
             return wrapper
         }
+    }
+
+    override func save(withDelegate delegate: Any?, didSave didSaveSelector: Selector?, contextInfo: UnsafeMutableRawPointer?) {
+        guard let url = fileURL, let typeName = fileType, onDiskBase != nil,
+              nativeSaveBaseURL == url.standardizedFileURL,
+              !isInViewingMode, !isLocked else {
+            super.save(withDelegate: delegate, didSave: didSaveSelector, contextInfo: contextInfo)
+            return
+        }
+        // The coordinated publisher, not package timestamps, decides whether the saved base changed.
+        // This native entry retains editor commits, activity serialization, error sheets and delegate replies.
+        super.save(to: url, ofType: typeName, for: .saveOperation,
+                   delegate: delegate, didSave: didSaveSelector, contextInfo: contextInfo)
     }
 
     override func save(
@@ -688,6 +706,7 @@ final class ShowDocument: NSDocument {
             uncertainRevision = nil
             publication = receipt.publication
             onDiskBase = receipt.fingerprint
+            nativeSaveBaseURL = receipt.url.standardizedFileURL
             if let catalog = result.catalog {
                 adoptVerifiedCatalog(catalog, captured: candidateRevision)
                 store.adoptArchives(catalog, captured: candidateRevision)
@@ -960,6 +979,7 @@ final class ShowDocument: NSDocument {
         uncertainRevision = nil
         publication = document.publication
         onDiskBase = fingerprint
+        nativeSaveBaseURL = url.standardizedFileURL
         adoptVerifiedCatalog(document.payload, captured: captured)
         if let captured { store.adoptArchives(document.payload, captured: captured) }
         AlignmentRuntimeProvider.reconcileActive(for: self)
@@ -1517,6 +1537,7 @@ final class ShowDocument: NSDocument {
             adoptVerifiedCatalog(adopted.document.payload)
             publication = adopted.document.publication
             onDiskBase = adopted.fingerprint
+            nativeSaveBaseURL = url.standardizedFileURL
             fileType = DocumentTypes.show
             fileModificationDate = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
             formatUpdateOriginal = nil
@@ -1567,6 +1588,7 @@ final class ShowDocument: NSDocument {
         show.store.replaceLoadedModel(store.residentModel.duplicatedAsNewShow())
         show.publication = nil
         show.onDiskBase = nil
+        show.nativeSaveBaseURL = nil
         show.updateChangeCount(.changeDone)
         return show
     }

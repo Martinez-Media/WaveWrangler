@@ -1,6 +1,7 @@
 import AppKit
 import Darwin
 import Foundation
+import ImageIO
 import Synchronization
 import Testing
 import WWCore
@@ -10,10 +11,10 @@ import WWPersistence
 @MainActor
 @Suite("Demand-driven native show catalogs", .serialized)
 struct LazyCatalogHostedTests {
-    private func fixture(nativeOpen: Bool = false) throws -> (ShowDocument, URL, ShowDocumentModel) {
+    private func fixture(nativeOpen: Bool = false, speakers: [Speaker] = []) throws -> (ShowDocument, URL, ShowDocumentModel) {
         let root = FileManager.default.temporaryDirectory.appending(path: "LazyCatalog-\(UUID())")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
-        let model = ShowDocumentModel(show: Show(title: "Generated catalog"),
+        let model = ShowDocumentModel(show: Show(title: "Generated catalog"), speakers: speakers,
             episodes: (1...3).map { (number: Int) in Episode(title: "Episode \(number)", number: number) })
         let url = root.appending(path: "Generated.wwshow")
         try LocalFileOperations().writeNew(ShowCatalogCoder().encode(ShowCatalog(model), revision: 1), to: url)
@@ -26,7 +27,6 @@ struct LazyCatalogHostedTests {
         }
         return (try open(url), root, model)
     }
-
     private func open(_ url: URL) throws -> ShowDocument {
         let document = ShowDocument()
         document.fileURL = url
@@ -138,6 +138,58 @@ struct LazyCatalogHostedTests {
         let edited = document.isDocumentEdited
         #expect(draftTitle == "Unsaved local draft")
         #expect(edited)
+    }
+
+    @Test func nativeSavePersistsSpeakerPhotosAfterMetadataOnlyChanges() async throws {
+        let preference = PersistenceEnvironment.autosaveGate.preference
+        PersistenceEnvironment.autosaveGate.preference = AutosavePreference(enabled: false, delaySeconds: 30)
+        defer { PersistenceEnvironment.autosaveGate.preference = preference }
+        let speaker = Speaker(name: "Synthetic speaker")
+        let (document, root, _) = try fixture(nativeOpen: true, speakers: [speaker])
+        defer { do { try finish(document, root: root) } catch { Issue.record(error) } }
+        let url = try #require(document.fileURL)
+        let catalog = document.verifiedCatalog
+        let episodes = try #require(catalog).episodes
+        for red in [0.2, 0.8] {
+            let bitmap = try #require(CGContext(data: nil, width: 16, height: 16, bitsPerComponent: 8,
+                bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+            bitmap.setFillColor(CGColor(red: red, green: 0.4, blue: 0.6, alpha: 1))
+            bitmap.fill(CGRect(x: 0, y: 0, width: 16, height: 16))
+            let image = try #require(bitmap.makeImage())
+            let encoded = NSMutableData()
+            let encoder = try #require(CGImageDestinationCreateWithData(encoded, "public.png" as CFString, 1, nil))
+            CGImageDestinationAddImage(encoder, image, nil)
+            try #require(CGImageDestinationFinalize(encoder))
+            let png = try await SpeakerAvatarImport.png(from: encoded as Data)
+            let applied = document.store.apply("Change Speaker Appearance") { model throws(DomainError) in
+                try model.settingSpeakerAppearance(.init(color: .teal, avatarPNG: png), for: speaker.id)
+            }
+            try #require(applied)
+            let prior = try LocalFileOperations().read(url)
+            try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(120)],
+                                                  ofItemAtPath: url.path)
+            #expect(try LocalFileOperations().read(url) == prior)
+            let reply = SaveReply()
+            document.save(withDelegate: reply, didSave: #selector(SaveReply.document(_:didSave:contextInfo:)),
+                          contextInfo: nil)
+            try await wait { reply.saved != nil }
+            #expect(reply.saved == true)
+            let saved = try ShowCatalogCoder().decode(LocalFileOperations().read(url)).payload
+            let savedPNG = saved.header.speakers.first?.appearance?.avatarPNG
+            let episodesUnchanged = saved.episodes == episodes
+            let verified = document.status.saveStatus.state.isVerifiedOnDisk
+            #expect(savedPNG == png)
+            #expect(episodesUnchanged)
+            #expect(verified)
+        }
+    }
+
+    private final class SaveReply: NSObject {
+        var saved: Bool?
+        @objc func document(_ document: NSDocument, didSave saved: Bool, contextInfo: UnsafeMutableRawPointer?) {
+            self.saved = saved
+        }
     }
 
     @Test func sharedWindowPinsAndArchivedUndoDoNotRetainVisitedPayloads() async throws {

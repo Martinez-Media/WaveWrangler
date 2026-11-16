@@ -51,13 +51,15 @@ Do not treat **Duplicate** or **Save As** as a way to down-save a newer show.
 Cloud-provider conflict versions are reported, not automatically merged or
 removed.
 
-If macOS detects another application's edit, its native sheet may offer **Save**
-and **Don't Save**. **Don't Save** cancels that save attempt and keeps your open
-edits. Choosing **Save** still cannot bypass WaveWrangler's exact-version check.
+For an already opened, writable show at its saved location, **Save** compares the actual saved contents,
+not just its timestamp. A sync provider touching package metadata or replacing
+it with identical contents does not cause an external-change warning. Different
+or missing saved contents are refused rather than offering to overwrite them.
 A refused native save can appear as **Not saved / Couldn't save**, rather than
 the separate **Conflict** status. Keep the edits open; **Save As** writes a new
 document without replacing the other writer's version. Closing after this failure
 offers **Save a Copy Elsewhere**, **Don't Save**, or **Cancel**.
+Moved documents still use the standard macOS relocation prompts.
 
 ## Recover unsaved work
 

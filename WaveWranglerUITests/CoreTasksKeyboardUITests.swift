@@ -108,52 +108,98 @@ final class CoreTasksKeyboardUITests: XCTestCase {
         }
     }
 
-    /// T16 (K16): another writer changes the file; native Save anyway still refuses the exact-base
-    /// conflict, reports Not saved, and Close offers a copy rather than a plain Save.
+    func testNativeSaveAfterMetadataOnlyPackageChanges() throws {
+        let document = try makeDocument("Metadata Only Save")
+        try task("native-save-metadata") {
+            let window = try launchAndOpen(document, autosave: false)
+            for (index, title) in ["First metadata-only save", "Repeated metadata-only save"].enumerated() {
+                try editShowTitle(window, title)
+                let prior = try ShowStorage.read(document)
+                if index == 1 {
+                    let replacement = workDirectory.appending(path: "Identical provider replacement.wwshow")
+                    try FileManager.default.copyItem(at: document, to: replacement)
+                    _ = try FileManager.default.replaceItemAt(document, withItemAt: replacement)
+                }
+                try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(120)],
+                                                      ofItemAtPath: document.path)
+                XCTAssertEqual(try ShowStorage.read(document), prior)
+                if index == 0 {
+                    XCTAssertTrue(app.chooseMenu(["File", "Save"]))
+                } else {
+                    app.typeKey("s", modifierFlags: .command)
+                }
+                XCTAssertTrue(Acceptance.waitFor(timeout: 10) { self.diskTitle(document) == title },
+                              "Native Save must not stop at an external-change warning for identical contents")
+                XCTAssertFalse(app.sheets.firstMatch.exists)
+            }
+            try editShowTitle(window, "Saved from native Close")
+            try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(120)],
+                                                  ofItemAtPath: document.path)
+            window.typeKey("w", modifierFlags: [.command, .shift])
+            let sheet = app.sheets.firstMatch
+            XCTAssertTrue(sheet.buttons["Save"].waitForExistence(timeout: 5))
+            sheet.buttons["Save"].click()
+            XCTAssertTrue(Acceptance.waitFor(timeout: 10) { !window.exists },
+                          "the original native Close callback completes after the verified save")
+            XCTAssertEqual(diskTitle(document), "Saved from native Close")
+        }
+    }
+
+    func testNativeSaveDoesNotRecreateADeletedPackage() throws {
+        let document = try makeDocument("Deleted Native Save")
+        try task("native-save-deleted") {
+            let window = try launchAndOpen(document, autosave: false)
+            try editShowTitle(window, "Keep my deleted-file draft")
+            try FileManager.default.removeItem(at: document)
+            app.typeKey("s", modifierFlags: .command)
+            let sheet = app.sheets.firstMatch
+            XCTAssertTrue(sheet.waitForExistence(timeout: 10), "the deleted destination is reported")
+            if sheet.buttons["Save"].exists { sheet.buttons["Save"].click() }
+            Acceptance.record(self, "Deleted destination refusal: \(nativeSheetDescription())")
+            let conflict = app.sheets.staticTexts.matching(NSPredicate(
+                format: "label CONTAINS[c] 'could not be saved' OR value CONTAINS[c] 'could not be saved'")).firstMatch
+            XCTAssertTrue(conflict.waitForExistence(timeout: 10), "missing saved bytes cannot be silently replaced")
+            XCTAssertFalse(app.sheets.buttons["Save"].exists, "a missing base has no force-overwrite choice")
+            XCTAssertFalse(FileManager.default.fileExists(atPath: document.path))
+            app.typeKey(.return, modifierFlags: [])
+            XCTAssertTrue(window.exists, "the unsaved draft stays open")
+        }
+    }
+
+    /// T16 (K16): another writer changes the contents without changing the timestamp; native Save
+    /// refuses the exact-base conflict, reports Not saved, and Close offers a copy rather than a plain Save.
     func testT16ConflictNeverOverwrites() throws {
         let document = try makeDocument("Conflict")
         try task("T16") {
             let window = try launchAndOpen(document, autosave: false)
+            let attributes = try FileManager.default.attributesOfItem(atPath: document.path)
+            let originalDate = try XCTUnwrap(attributes[.modificationDate] as? Date)
             try probe(["save", "--file", document.path, "--title", "Other Writer"])
+            try FileManager.default.setAttributes([.modificationDate: originalDate], ofItemAtPath: document.path)
             check(diskTitle(document) == "Other Writer", "second writer published")
             let otherVersion = try ShowStorage.read(document)
             let otherModel = try ShowPackageCoder().decode(otherVersion).payload
             try editShowTitle(window, "Mine")
             let status = element("ww.show.saveStatus")
-            app.typeKey("s", modifierFlags: .command)
-            check(Acceptance.waitFor(timeout: 5) {
-                self.app.sheets.firstMatch.exists
-            }, "Save presents its conflict response: \(nativeSheetDescription()), status \(value(status))")
-            // AppKit asks about the external change ("Save anyway?"). Choose its Save: the base check must
-            // still refuse to overwrite the other writer's version (WW-009 C3/C4).
-            if app.sheets.firstMatch.waitForExistence(timeout: 3) {
+            for attempt in 1...2 {
+                app.typeKey("s", modifierFlags: .command)
+                check(app.sheets.firstMatch.waitForExistence(timeout: 10),
+                      "Save attempt \(attempt) presents its conflict refusal: \(nativeSheetDescription())")
                 let sheet = app.sheets.firstMatch
                 Acceptance.record(self, "T16 sheet: \(sheet.staticTexts.allElementsBoundByIndex.map(\.value)) buttons \(sheet.buttons.allElementsBoundByIndex.map(\.title))")
-                try audit("T16 external-change sheet")
-                check(sheet.buttons["Save"].exists && sheet.buttons["Don’t Save"].exists,
-                      "native external-change sheet offers Save and Don’t Save")
-                sheet.buttons["Don’t Save"].click()
+                try audit("T16 exact-base refusal")
+                let refusal = sheet.staticTexts.matching(NSPredicate(
+                    format: "label CONTAINS[c] 'Expected r' OR value CONTAINS[c] 'Expected r'")).firstMatch
+                check(refusal.exists && !sheet.buttons["Save"].exists,
+                      "the actual byte conflict is refused without a force-overwrite choice")
+                app.typeKey(.return, modifierFlags: [])
                 check(Acceptance.waitFor(timeout: 5) { !self.app.sheets.firstMatch.exists },
-                      "Don’t Save cancels this save attempt")
-                check(window.exists && window.title.contains("Mine"), "cancel keeps the user's open edits")
-                check(try ShowStorage.read(document) == otherVersion, "cancel does not publish over the other writer")
-                app.typeKey("s", modifierFlags: .command)
-                check(sheet.waitForExistence(timeout: 5), "explicit retry presents the external-change sheet again")
-                let before = nativeSheetDescription()
-                if sheet.buttons["Save"].exists { sheet.buttons["Save"].click() }
-                else if sheet.buttons["OK"].exists { app.typeKey(.return, modifierFlags: []) }
-                else { app.typeKey(.escape, modifierFlags: []) }
-                waitForSheetTransition(from: before, window: window)
-                if app.sheets.firstMatch.exists {
-                    let refusal = app.sheets.firstMatch
-                    Acceptance.record(self, "T16 after Save anyway: \(refusal.staticTexts.allElementsBoundByIndex.map { $0.value ?? $0.label }) buttons \(refusal.buttons.allElementsBoundByIndex.map(\.title))")
-                    // An OK-only NSAlert has no Cancel button, so Esc doesn't dismiss it; Return (its default) does.
-                    app.typeKey(.return, modifierFlags: [])
-                    check(Acceptance.waitFor(timeout: 5) { !self.app.sheets.firstMatch.exists }, "refusal alert dismissed with Return")
-                }
+                      "refusal alert dismissed with Return")
+                check(window.exists, "refusal keeps the user's document open")
+                check(try ShowStorage.read(document) == otherVersion, "retry never overwrites the competing version")
             }
-            check(diskTitle(document) == "Other Writer", "the other version is not overwritten (even after Save anyway)")
-            Acceptance.record(self, "T16 save status after Save anyway: label \(status.label) value \(value(status)) window title \(window.title)")
+            check(diskTitle(document) == "Other Writer", "the other version is not overwritten")
+            Acceptance.record(self, "T16 save status after refusal: label \(status.label) value \(value(status)) window title \(window.title)")
             check(Acceptance.waitFor(timeout: 5) {
                 self.value(status).hasPrefix("Not saved") && self.value(status).contains("Couldn't save:")
             }, "native refused save is explicitly Not saved/Couldn't save: \(value(status))")

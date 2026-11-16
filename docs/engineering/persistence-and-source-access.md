@@ -155,11 +155,25 @@ independently reads it back. Library acknowledgment and rebuildable indexes
 follow successful document publication. A postreplacement failure or uncertain
 acknowledgment is not a verified Saved state.
 
+For an opened, writable show still at its last read or verified URL, native Save
+enters AppKit's delegate-based URL save directly. That entry still commits registered editors,
+serializes native activities, presents errors and replies to the original
+delegate, then uses the existing capture barrier and verified publisher.
+The publisher's coordinated exact-byte check replaces the higher-level
+timestamp/delete preflight: provider metadata touches and identical-byte
+replacements are not conflicts; different or missing destination bytes are
+refused, with the candidate retained and the draft still dirty. Presenter moves,
+including moves into the Trash, retain the stock native entry when the URL
+changes; relocation never changes the expected saved bytes. Untitled, locked,
+viewing-mode and baseless documents also retain the stock native entry.
+No modification-date reset, overwrite override or extra main-thread package
+read is used.
+
 The document retains its latest save failure for the save-status **Details**
 action, including typed publication diagnostics and a bounded NSError cause
 chain. All windows use that same owner; a verified adopted save clears the
-failure. Showing diagnostics neither retries publication nor overrides native
-or exact-base conflict checks.
+failure. Showing diagnostics neither retries publication nor overrides saving
+safety or exact-base conflict checks.
 
 Recovery is device-local and keyed by logical ID: validated prior publications
 (last three), unpublished edit checkpoints, conflicts and migration backups
