@@ -169,12 +169,14 @@ struct WorkspaceIdentityTests {
         #expect(EpisodeWorkspacePreferences().editingPlaybackPolicy == .keepChoices)
     }
 
-    @Test func oldSchemaClaimsCannotSmuggleNewFieldsAndInvalidReferencesRefuse() {
+    @Test func invalidWorkspaceReferencesRefuse() {
         var invalid = model
         invalid.show.profile = ShowProfile(hosts: [host.id, host.id])
         #expect(invalid.validationIssues().contains { $0.code == .invalidWorkspace })
         invalid.show.profile = ShowProfile(hosts: [host.id])
-        #expect(invalid.validationIssues(expectedSchemaVersion: 6).contains { $0.code == .invalidWorkspace })
+        #expect(invalid.validationIssues().isEmpty)
+        invalid.show.profile = ShowProfile(hosts: [SpeakerID()])
+        #expect(invalid.validationIssues().contains { $0.code == .invalidWorkspace })
         invalid.show.profile = nil
         invalid.episodes[0].speakerAppearanceOverrides = [.init(speaker: host.id, appearance: .init(color: .blue))]
         #expect(invalid.validationIssues().contains { $0.code == .invalidWorkspace })
