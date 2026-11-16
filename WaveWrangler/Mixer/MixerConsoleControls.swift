@@ -14,7 +14,7 @@ struct MixerConsoleDial: View {
     private var position: Double { (value - range.lowerBound) / (range.upperBound - range.lowerBound) }
     var body: some View {
         VStack(spacing: 4) {
-            Text(title).font(.caption).foregroundStyle(.secondary)
+            Text(title).wwFont(.caption).foregroundStyle(.secondary)
             ZStack {
                 Circle().trim(from: 0.125, to: 0.875)
                     .stroke(.quaternary, style: StrokeStyle(lineWidth: 3, lineCap: .round))
@@ -64,6 +64,7 @@ struct MixerConsoleDial: View {
 }
 
 struct MixerConsoleFader: View {
+    @Environment(\.wwTextSize) private var textSize
     @Binding var value: Double
     let identifier: String
     let endEditing: () -> Void
@@ -77,13 +78,14 @@ struct MixerConsoleFader: View {
                 Capsule().fill(.primary.opacity(0.18)).frame(width: 4, height: travel)
                 ForEach([-96.0, -48, -12, 0, 12, 24], id: \.self) { db in
                     HStack(spacing: 4) {
-                        Text(db == -96 ? "-96" : String(Int(db))).font(.system(size: 9))
+                        Text(db == -96 ? "-96" : String(Int(db)))
+                            .font(.system(size: textSize.pointSize(forBase: 9)))
                             .foregroundStyle(db == 0 ? .primary : .secondary)
-                            .frame(width: 22, alignment: .trailing)
+                            .frame(width: textSize.pointSize(forBase: 22), alignment: .trailing)
                         Rectangle().fill(.primary.opacity(db == 0 ? 0.7 : 0.25))
                             .frame(width: db == 0 ? 13 : 7, height: 1)
                     }
-                    .offset(x: -20, y: (0.5 - MixerConsoleScale.faderPosition(db)) * travel)
+                    .offset(x: -textSize.pointSize(forBase: 20), y: (0.5 - MixerConsoleScale.faderPosition(db)) * travel)
                 }
                 RoundedRectangle(cornerRadius: 3).fill(.background)
                     .frame(width: 28, height: 18)
@@ -94,7 +96,7 @@ struct MixerConsoleFader: View {
                     .shadow(color: .black.opacity(0.18), radius: 2, y: 2)
                     .offset(y: (0.5 - MixerConsoleScale.faderPosition(value)) * travel)
             }
-            .frame(width: 70, height: geometry.size.height).contentShape(Rectangle())
+            .frame(width: textSize.pointSize(forBase: 70), height: geometry.size.height).contentShape(Rectangle())
             .gesture(DragGesture(minimumDistance: 1).onChanged { drag in
                 focused = true
                 let delta = previousDrag - drag.translation.height
@@ -116,7 +118,8 @@ struct MixerConsoleFader: View {
             .accessibilityIdentifier("\(identifier).fader")
             .help("Output volume, -96 to +24 dB. Drag vertically; Shift adjusts finely. Option-click or double-click for unity gain.")
         }
-        .frame(minWidth: 70, maxWidth: 70, minHeight: 164, maxHeight: .infinity)
+        .frame(minWidth: textSize.pointSize(forBase: 70), maxWidth: textSize.pointSize(forBase: 70),
+               minHeight: 164, maxHeight: .infinity)
         .onDisappear { endEditing() }
     }
 

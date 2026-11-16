@@ -16,6 +16,11 @@
     {
       "parallelizable": false,
       "selectedTests": [
+        "AccessibilityDiscoveryUITests",
+        "ControlsSidebarUITests/testAlignmentAndRecordingsDetachAndReattachFromToolbar()",
+        "ControlsSidebarUITests/testGlobalCutRailOwnsOneCutAndItsEditableBoundaries()",
+        "ControlsSidebarUITests/testFillerWordsConfigureDefaultsAndShowOverrideWithoutImplicitCuts()",
+        "MixerUITests/testOptionClickOpensReviewAndMixerDirectlyInSeparateWindows()",
         "ContrastEvidenceUITests",
         "SelectionContrastUITests",
         "VoiceOverWalkUITests",

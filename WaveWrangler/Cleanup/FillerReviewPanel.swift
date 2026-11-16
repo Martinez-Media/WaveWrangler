@@ -254,6 +254,7 @@ struct ReviewPanelSplitState: NSViewRepresentable {
 }
 
 struct FillerIntervalSizeControls: View {
+    @Environment(\.wwTextSize) private var textSize
     @Bindable var model: EpisodeCleanupModel
     let reviewID: UUID
     var prefix = "ww.review.size"
@@ -280,7 +281,7 @@ struct FillerIntervalSizeControls: View {
             .accessibilityIdentifier("\(prefix).expand")
         }
         .labelStyle(.iconOnly)
-        .controlSize(.mini)
+        .controlSize(textSize.percent >= 150 ? .large : .small)
     }
 }
 
@@ -308,10 +309,18 @@ private struct ReviewRowCell: View {
 }
 
 struct FillerReviewPanel: View {
+    @Environment(\.wwTextSize) private var textSize
     @Bindable var model: EpisodeCleanupModel
     var detached = false
     @State private var selection: UUID?
     @State private var showsFillerWords = false
+    @State private var showsDetails = false
+    @State private var detailSelection: UUID?
+
+    private var scale: Double { textSize.pointSize(forBase: 1) }
+    private var detailRow: FillerReviewRow? {
+        rows.first { $0.id == detailSelection } ?? rows.first
+    }
 
     private var rows: [FillerReviewRow] {
         model.reviewRows.filter {
@@ -332,33 +341,41 @@ struct FillerReviewPanel: View {
                 }
             }
             .padding(8)
-            .controlSize(.small)
+            .controlSize(textSize.percent >= 150 ? .large : .small)
+            if let error = model.error {
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .wwFont(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 8).padding(.bottom, 8)
+                    .accessibilityIdentifier("ww.review.error")
+            }
             Divider()
             Table(rows, selection: $selection) {
                 TableColumn("Speaker") { row in
                     ReviewRowCell(model: model, reviewID: row.id, text: row.speaker)
-                }.width(min: 70, ideal: 80, max: 160)
+                }.width(min: 70 * scale, ideal: 80 * scale, max: 160 * scale)
                 TableColumn("Phrase") { row in
                     ReviewRowCell(model: model, reviewID: row.id, text: row.phrase)
                         .accessibilityIdentifier("ww.cleanup.filler.review.\(row.id)")
-                }.width(min: 70, ideal: 120)
+                }.width(min: 70 * scale, ideal: 120 * scale)
                 TableColumn("Status") { row in
                     ReviewRowCell(model: model, reviewID: row.id, text: row.status)
                         .foregroundStyle(row.issue == nil ? Color.primary : .orange)
                         .help(row.issue ?? row.status)
-                }.width(min: 80, ideal: 90, max: 160)
+                }.width(min: 100 * scale, ideal: 110 * scale, max: 180 * scale)
                 TableColumn(model.workspaceAlignment?.audioEditor.hasArrangement == true ? "Program time" : "Aligned time") { row in
                     let time = model.workspaceAlignment?.audioEditor.hasArrangement == true
                         ? AlignmentPresentation.formatTime(model.cutTimeline.editedTime(forAlignedTime: row.start)) : row.time
                     ReviewRowCell(model: model, reviewID: row.id,
                         text: time).monospacedDigit()
-                }.width(min: 95, ideal: 105, max: 135)
+                }.width(min: 110 * scale, ideal: 120 * scale, max: 160 * scale)
                 TableColumn("Length") { row in
                     ReviewRowCell(model: model, reviewID: row.id, text: row.duration).monospacedDigit()
-                }.width(min: 55, ideal: 55, max: 85)
+                }.width(min: 60 * scale, ideal: 65 * scale, max: 95 * scale)
                 TableColumn("Adjust") { row in
                     FillerIntervalSizeControls(model: model, reviewID: row.id, prefix: "ww.review.size.\(row.id)")
-                }.width(60)
+                }.width(65 * scale)
                 TableColumn("Cut") { row in
                     if let cut = row.cutID {
                         Button("Restore", systemImage: "arrow.uturn.backward") { model.restoreManualCut(cut) }
@@ -370,9 +387,9 @@ struct FillerReviewPanel: View {
                             .help(row.issue ?? "Cut this row's current interval across every aligned track. Originals stay unchanged; Undo restores the audio.")
                             .accessibilityIdentifier("ww.review.cut.\(row.id)")
                     }
-                }.width(min: 80, ideal: 85, max: 120)
+                }.width(min: 90 * scale, ideal: 100 * scale, max: 140 * scale)
             }
-            .controlSize(.small)
+            .controlSize(textSize.percent >= 150 ? .large : .small)
             .contextMenu(forSelectionType: UUID.self) { selection in
                 if let id = selection.first {
                     Button("Center on waveform") { model.requestReviewRowFocus(id) }
@@ -381,6 +398,7 @@ struct FillerReviewPanel: View {
                 if let id = selection.first { model.auditionReviewRow(id) }
             }
             .accessibilityIdentifier("ww.review.table")
+            .accessibilityLabel("Transcript and filler reviews")
             .overlay {
                 ReviewPlaybackIndicator(rows: rows, alignedTime: model.reviewPlaybackAlignedTime)
                     .allowsHitTesting(false)
@@ -395,7 +413,8 @@ struct FillerReviewPanel: View {
                 }
             }
             Divider()
-            HStack {
+            ScrollView(.horizontal) {
+                HStack {
                 Button("Find Filler Candidates") { model.proposeFillers() }
                     .disabled(!model.canReviewFillers)
                     .help("Refresh pending suggestions using the current filler words. Existing judgments and cuts are retained; no audio is read or cut.")
@@ -406,11 +425,20 @@ struct FillerReviewPanel: View {
                         ReviewFillerWordsSettings(store: model.state.store, episodeID: model.episodeID)
                     }
                 Button("Mark missed filler") { model.markMissedFiller() }.disabled(!model.canReviewFillers)
-                Text("Select to center and zoom; double-click to play. Auto Cut uses the current boundaries on all tracks.")
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                Button("Review Details…") {
+                    detailSelection = rows.first { $0.id == selection }?.id ?? rows.first?.id
+                    showsDetails = true
+                }
+                    .disabled(rows.isEmpty)
+                    .help("Read the selected review's full phrase, status and exact times, or the first review if none is selected.")
+                    .accessibilityIdentifier("ww.review.details")
+                    .popover(isPresented: $showsDetails) {
+                        if let row = detailRow { reviewDetails(row) }
+                    }
+                }
+                .fixedSize(horizontal: true, vertical: false)
             }
-
-            .controlSize(.small)
+            .controlSize(textSize.percent >= 150 ? .large : .small)
             .padding(6)
         }
         .accessibilityElement(children: .contain)
@@ -424,27 +452,82 @@ struct FillerReviewPanel: View {
 
     private var heading: some View {
         HStack(spacing: 6) {
-            Text("Transcript & Review").font(.headline)
-            Text("\(rows.count) of \(model.reviewRows.count)").font(.caption).foregroundStyle(.secondary)
+            Text("Transcript & Review").wwFont(.headline)
+            Text("\(rows.count) of \(model.reviewRows.count)").wwFont(.caption).foregroundStyle(.secondary)
         }
     }
 
     private var filters: some View {
-        HStack(spacing: 6) {
-            TextField("Filter phrases or speakers", text: $model.reviewSearch)
-                .textFieldStyle(.roundedBorder).frame(minWidth: 100, maxWidth: 240)
-                .accessibilityIdentifier("ww.review.search")
-            Picker("Speaker", selection: $model.reviewSpeakerFilter) {
-                Text("All speakers").tag(Optional<SpeakerID>.none)
-                ForEach(model.state.store.residentModel.speakers) { speaker in
-                    Text(speaker.name).tag(Optional(speaker.id))
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 6) { search; speakerFilter; statusFilter }
+            VStack(alignment: .leading, spacing: 6) {
+                search
+                HStack { speakerFilter; statusFilter }
+            }
+        }
+    }
+
+    private var search: some View {
+        TextField("Filter phrases or speakers", text: $model.reviewSearch)
+            .textFieldStyle(.roundedBorder).frame(minWidth: 100, maxWidth: 240)
+            .accessibilityIdentifier("ww.review.search")
+    }
+
+    private var speakerFilter: some View {
+        Picker("Speaker", selection: $model.reviewSpeakerFilter) {
+            Text("All speakers").tag(Optional<SpeakerID>.none)
+            ForEach(model.state.store.residentModel.speakers) { speaker in
+                Text(speaker.name).tag(Optional(speaker.id))
+            }
+        }
+        .labelsHidden().accessibilityIdentifier("ww.review.speaker")
+    }
+
+    private var statusFilter: some View {
+        Picker("Status", selection: $model.reviewStatusFilter) {
+            ForEach(FillerReviewFilter.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+        }
+        .labelsHidden().accessibilityIdentifier("ww.review.status")
+    }
+
+    private func reviewDetails(_ row: FillerReviewRow) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Review Details").wwFont(.headline).accessibilityAddTraits(.isHeader)
+                Picker("Review interval", selection: $detailSelection) {
+                    ForEach(rows) { candidate in
+                        Text("\(candidate.speaker): \(candidate.phrase), \(candidate.time)")
+                            .tag(Optional(candidate.id))
+                    }
                 }
+                .accessibilityLabel("Review interval")
+                .accessibilityIdentifier("ww.review.details.interval")
+                detail("Speaker", row.speaker)
+                detail("Phrase", row.phrase)
+                detail("Status", row.status)
+                detail("Aligned time", row.time)
+                if model.workspaceAlignment?.audioEditor.hasArrangement == true {
+                    detail("Program time", AlignmentPresentation.formatTime(
+                        model.cutTimeline.editedTime(forAlignedTime: row.start)))
+                }
+                detail("End time (aligned)", AlignmentPresentation.formatTime(row.end))
+                detail("Length", row.duration)
+                if let issue = row.issue { detail("Recovery", issue) }
+                Text("Select to center and zoom; double-click to play. Auto Cut uses the current boundaries on all tracks.")
+                    .wwFont(.caption)
             }
-            .labelsHidden().accessibilityIdentifier("ww.review.speaker")
-            Picker("Status", selection: $model.reviewStatusFilter) {
-                ForEach(FillerReviewFilter.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-            }
-            .labelsHidden().accessibilityIdentifier("ww.review.status")
+            .textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(16)
+        }
+        .frame(width: 420, height: 340)
+        .accessibilityIdentifier("ww.review.details.content")
+    }
+
+    private func detail(_ title: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title).wwFont(.caption).foregroundStyle(.secondary)
+            Text(value).fixedSize(horizontal: false, vertical: true)
         }
     }
 

@@ -3,6 +3,7 @@ import WWCore
 import WWMix
 
 struct MixerView: View {
+    @Environment(\.wwTextSize) private var textSize
     @Bindable var presentation: EpisodeMixerPresentation
     var detached = false
     @State private var trackScroll = MixerTrackScrollState()
@@ -41,12 +42,12 @@ struct MixerView: View {
                                     ForEach(presentation.episode?.speakerAssignments ?? [], id: \.speakerID) { assignment in
                                         MixerConsoleStrip(presentation: presentation, bus: .speaker(assignment.speakerID),
                                                           minimumHeight: viewport.size.height)
-                                            .frame(width: 144)
+                                            .frame(width: stripWidth)
                                     }
                                     ForEach(presentation.episode?.audioArrangement?.tracks ?? []) { track in
                                         MixerConsoleStrip(presentation: presentation, bus: .audioTrack(track.id),
                                                           minimumHeight: viewport.size.height)
-                                            .frame(width: 144)
+                                            .frame(width: stripWidth)
                                     }
                                     if presentation.episode?.speakerAssignments.isEmpty == true
                                         && presentation.episode?.audioArrangement?.tracks.isEmpty != false {
@@ -58,7 +59,7 @@ struct MixerView: View {
                             }
                             Divider()
                             MixerConsoleStrip(presentation: presentation, bus: .master, minimumHeight: viewport.size.height)
-                                .frame(width: 144)
+                                .frame(width: stripWidth)
                                 .background(.bar)
                         }
                     }
@@ -68,7 +69,7 @@ struct MixerView: View {
                             HStack(spacing: 0) {
                                 MixerTrackScroller(state: trackScroll)
                                     .frame(width: trackScroll.viewportWidth)
-                                Spacer(minLength: 145)
+                                Spacer(minLength: stripWidth + 1)
                             }
                             .frame(height: MixerTrackScroller.thickness)
                         }
@@ -110,8 +111,10 @@ struct MixerView: View {
     private var tracksWidth: CGFloat {
         let count = (presentation.episode?.speakerAssignments.count ?? 0)
             + (presentation.episode?.audioArrangement?.tracks.count ?? 0)
-        return count == 0 ? 240 : CGFloat(count) * 144
+        return count == 0 ? 240 : CGFloat(count) * stripWidth
     }
+
+    private var stripWidth: CGFloat { textSize.pointSize(forBase: 144) }
 }
 
 struct RecordingInputGainControl: View {
@@ -144,6 +147,7 @@ struct RecordingInputGainControl: View {
 }
 
 struct MixerNumberControl: View {
+    @Environment(\.wwTextSize) private var textSize
     let title: String
     @Binding var value: Double
     let range: ClosedRange<Double>
@@ -161,11 +165,11 @@ struct MixerNumberControl: View {
         VStack(alignment: .leading, spacing: 3) {
             HStack {
                 if !compact {
-                    Text(title).font(.caption)
+                    Text(title).wwFont(.caption)
                     Spacer()
                 }
                 TextField(title, text: $draft)
-                    .multilineTextAlignment(.trailing).frame(width: 65)
+                    .multilineTextAlignment(.trailing).frame(width: textSize.pointSize(forBase: 65))
                     .textFieldStyle(.roundedBorder).focused($focused)
                     .accessibilityIdentifier(identifier)
                     .onSubmit { if draftIsDirty { applyDraft(ending: true) }; endEditing() }

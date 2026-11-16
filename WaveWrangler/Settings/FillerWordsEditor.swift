@@ -9,7 +9,7 @@ struct ReviewFillerWordsSettings: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Filler Words").font(.headline)
+                Text("Filler Words").wwFont(.headline)
                 Picker("Scope", selection: $speakerID) {
                     Text("This show").tag(SpeakerID?.none)
                     ForEach(store.residentModel.speakers.filter {
@@ -19,6 +19,7 @@ struct ReviewFillerWordsSettings: View {
                     }
                 }
                 .accessibilityIdentifier("ww.review.fillerWords.scope")
+                .accessibilityLabel("Filler-word scope")
                 DocumentFillerWordsEditor(store: store, speakerID: speakerID, expanded: true)
                     .id(speakerID)
                 Button("App Filler-Word Defaults…") { SettingsWindowController.show(pane: .transcription) }
@@ -26,6 +27,8 @@ struct ReviewFillerWordsSettings: View {
             .padding(16)
         }
         .frame(width: 420, height: 380)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Filler Words")
     }
 }
 
@@ -35,16 +38,21 @@ struct FillerWordsInput: View {
     let apply: (FillerWords) -> Void
     @State private var draft = ""
     @State private var error: String?
+    @FocusState private var wordsFocused: Bool
+
+    private let guidance = "Whole words only, separated by commas or new lines. Matching ignores case and surrounding punctuation. An empty list turns off suggestions."
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             TextField("Words separated by commas", text: $draft, axis: .vertical)
                 .lineLimit(2...4)
                 .textFieldStyle(.roundedBorder)
-                .accessibilityLabel("Filler words")
+                .focused($wordsFocused)
+                .accessibilityLabel(error == nil ? "Filler words" : "Filler words, invalid entry")
+                .accessibilityHint(error ?? guidance)
                 .accessibilityIdentifier("\(identifier).words")
                 .onSubmit(save)
-            Text("Whole words only, separated by commas or new lines. Matching ignores case and surrounding punctuation. An empty list turns off suggestions.")
+            Text(guidance)
                 .wwFont(.caption)
                 .fixedSize(horizontal: false, vertical: true)
             Button("Apply Words", action: save)
@@ -54,12 +62,14 @@ struct FillerWordsInput: View {
                 Label(error, systemImage: "exclamationmark.triangle")
                     .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("\(identifier).error")
             }
         }
         .onChange(of: value, initial: true) { _, value in
             draft = value?.words.joined(separator: ", ") ?? ""
             error = nil
         }
+        .onChange(of: draft) { _, _ in error = nil }
     }
 
     private func save() {
@@ -68,7 +78,10 @@ struct FillerWordsInput: View {
             apply(words)
             error = nil
         } catch {
-            self.error = "Enter up to 128 single words (letters only, at most 64 UTF-8 bytes each). Phrases are not supported."
+            let message = "Enter up to 128 single words (letters only, at most 64 UTF-8 bytes each). Phrases are not supported."
+            if self.error != message { AccessibilityNotification.Announcement(message).post() }
+            self.error = message
+            wordsFocused = true
         }
     }
 }

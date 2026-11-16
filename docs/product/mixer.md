@@ -84,6 +84,11 @@ or applying cuts. Do not use that mode to approve the final edit.
 
 Monitoring is buffered, not live microphone monitoring or zero-latency
 processing. Meters describe prepared digital audio, not acoustic output.
+The held-peak reset button exposes the retained sample peak in dBFS and whether
+clipping is latched, or explicitly reports no held measurement. Reset clears the
+held measurement and clipping latch; meter updates do not make continuous
+announcements. Text and readouts follow the app text size, with wider strips
+and scrolling rather than smaller selected text.
 For a delivery review, also inspect the [export](export.md) and its report.
 
 [User guide](README.md)

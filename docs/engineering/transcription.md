@@ -124,6 +124,21 @@ selection/filter state, document and Undo history. Navigation/word indexes are
 keyed by actual content and timing, not just transcript IDs; same-ID word
 changes invalidate cached analysis. Playback position is view state and must
 not trigger full review reclassification.
+Review renders the shared cleanup error locally; the cleanup owner announces
+only transitions to a different non-nil error, avoiding duplicate notifications
+from multiple presentation hosts. Review fonts and column widths use `wwTextSize`;
+keyboard-accessible Review Details exposes complete status and exact times
+without requiring column resizing. Timeline word-row height grows with its font,
+not with waveform or time geometry.
+The detached Review controller also clamps native resize proposals to its
+720-by-300 content minimum; a text-size/layout update must not make its footer
+unreachable by allowing a smaller window.
+
+The shared filler-words input keeps a rejected draft, names the invalid field,
+attaches correction guidance as its accessibility hint, and returns focus to it.
+Only a new validation failure posts an announcement; editing or a changed stored
+value clears stale error state. This contract applies to app, show and speaker
+editors without introducing implicit scans, saves or source access.
 
 Keep detection display, approximate word timing, reviewed edit boundaries and
 production composition distinct. Product interaction details belong in the

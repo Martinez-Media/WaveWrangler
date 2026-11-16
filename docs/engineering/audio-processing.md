@@ -68,6 +68,12 @@ Live gain/pan/mute ramps are 480 frames (10 ms). Finite overunity output remains
 overunity; meters report sample peak/RMS/headroom, not integrated LUFS or true
 peak. Delivery conversion/clipping policy belongs in
 [export](export-codecs.md), not the production mixer.
+The held-peak reset button exposes the maximum retained channel sample peak in
+dBFS and the latched clipping state as its accessibility value. An absent or reset
+peak is explicitly unmeasured, not 0 dBFS. Reading/updating meters posts no speech
+announcements; the action still resets the existing shared metering owner.
+Mixer readout fonts and their strip/field widths follow `wwTextSize`; the fader's
+dB mapping and meter/time geometry remain unchanged.
 
 Admit compatible `aufx`/`aumf` units only, disable unused auxiliary inputs and
 validate actual bus formats. Missing/incompatible/failed units refuse with slot

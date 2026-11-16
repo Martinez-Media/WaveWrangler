@@ -436,14 +436,15 @@ final class WaveformNavigationUITests: XCTestCase {
             } else {
                 XCTAssertFalse(try XCTUnwrap(thumb.value as? String).isEmpty)
             }
-            slider.adjust(toNormalizedSliderPosition: 0.6)
-            XCTAssertEqual(slider.normalizedSliderPosition, 0.6, accuracy: 0.03)
-            slider.click()
-            let before = slider.normalizedSliderPosition
-            slider.typeKey(.rightArrow, modifierFlags: [])
-            XCTAssertGreaterThan(slider.normalizedSliderPosition, before)
+            // AppKit's padded track makes normalized pointer placement imprecise on small displays.
+            // Establish an actual endpoint, then verify both keyboard directions without that proxy.
             slider.dragHorizontalSliderToMaximum()
             let maximum = identifier == "alignment.waveforms.zoom" ? 1.0 : 220.0
+            XCTAssertEqual(try XCTUnwrap(slider.value as? NSNumber).doubleValue, maximum, accuracy: 0.000001)
+            let before = slider.normalizedSliderPosition
+            slider.typeKey(.leftArrow, modifierFlags: [])
+            XCTAssertLessThan(slider.normalizedSliderPosition, before)
+            slider.typeKey(.rightArrow, modifierFlags: [])
             XCTAssertEqual(try XCTUnwrap(slider.value as? NSNumber).doubleValue, maximum, accuracy: 0.000001)
             XCTAssertEqual(app.textFields["alignment.waveforms.playhead"].value as? String, playhead)
         }

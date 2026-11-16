@@ -105,7 +105,12 @@ final class EpisodeCleanupModel {
     var transcriptionStatus: CleanupTranscriptionStatus?
     var activeModelName: String?
     var message = "All Primaries must have current accepted alignment before transcription."
-    var error: String?
+    var error: String? {
+        didSet {
+            // Announce once at the shared owner, not once per docked/detached host.
+            if let error, error != oldValue { state.announce(error) }
+        }
+    }
     private var readinessError: String?
     let transcriptionSettings: TranscriptionSettings
     @ObservationIgnored private let suppliedRuntime: AlignmentRuntime?

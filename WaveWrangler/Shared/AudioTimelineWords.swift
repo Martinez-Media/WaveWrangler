@@ -219,6 +219,7 @@ final class AudioTimelineWordLayoutCache {
 }
 
 struct AudioTimelineWords: View {
+    @Environment(\.wwTextSize) private var textSize
     let words: [TranscriptWord]
     let start: Double
     let duration: Double
@@ -251,7 +252,7 @@ struct AudioTimelineWords: View {
             .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
             .clipped()
         }
-        .frame(height: layout.height)
+        .frame(height: textSize.pointSize(forBase: layout.height))
         .contentShape(Rectangle())
         .onGeometryChange(for: Double.self) { $0.size.width } action: { availableWidth = $0 }
         .task(id: input) {
@@ -306,12 +307,12 @@ struct AudioTimelineWords: View {
                     }
                 }
                 .overlay(alignment: .leading) {
-                    Text(item.text).font(.system(size: 11)).lineLimit(1)
+                    Text(item.text).wwFont(.subheadline).lineLimit(1)
                         .padding(.horizontal, 3)
-                        .frame(width: item.labelWidth, height: 21, alignment: .leading)
+                        .frame(width: item.labelWidth, height: textSize.pointSize(forBase: 21), alignment: .leading)
                         .clipped()
                 }
-                .frame(width: max(0.5, item.width), height: 21)
+                .frame(width: max(0.5, item.width), height: textSize.pointSize(forBase: 21))
                 .clipped()
                 .contentShape(Rectangle())
         }
@@ -324,17 +325,18 @@ struct AudioTimelineWords: View {
 
     private func timingMarkers(for item: AudioTimelineWordLayout.Placement) -> Path {
         let right = CGFloat(max(0.5, item.width - 0.5))
+        let bottom = textSize.pointSize(forBase: 21) - 0.5
         let lower = item.words.compactMap(\.alignedStart).min() ?? start
         let upper = item.words.compactMap(\.alignedEnd).max() ?? start + duration
         return Path { path in
             if lower >= start {
                 path.move(to: CGPoint(x: 0.5, y: 0))
-                path.addLine(to: CGPoint(x: 0.5, y: 20.5))
+                path.addLine(to: CGPoint(x: 0.5, y: bottom))
             }
-            path.move(to: CGPoint(x: 0.5, y: 20.5))
-            path.addLine(to: CGPoint(x: right, y: 20.5))
+            path.move(to: CGPoint(x: 0.5, y: bottom))
+            path.addLine(to: CGPoint(x: right, y: bottom))
             if upper <= start + duration {
-                path.move(to: CGPoint(x: right, y: 20.5))
+                path.move(to: CGPoint(x: right, y: bottom))
                 path.addLine(to: CGPoint(x: right, y: 0))
             }
         }

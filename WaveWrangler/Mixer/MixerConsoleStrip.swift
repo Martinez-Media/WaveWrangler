@@ -3,6 +3,7 @@ import WWCore
 import WWMix
 
 struct MixerConsoleStrip: View {
+    @Environment(\.wwTextSize) private var textSize
     @Bindable var presentation: EpisodeMixerPresentation
     let bus: MixerBus
     var minimumHeight: CGFloat = 0
@@ -50,7 +51,7 @@ struct MixerConsoleStrip: View {
 
     private var stripContent: some View {
         VStack(spacing: 0) {
-            Text(name).font(.headline).lineLimit(1).truncationMode(.middle)
+            Text(name).wwFont(.headline).lineLimit(1).truncationMode(.middle)
                 .frame(maxWidth: .infinity, minHeight: 32).padding(.horizontal, 6)
                 .background(color.opacity(0.2))
                 .help(name).accessibilityAddTraits(.isHeader)
@@ -69,13 +70,13 @@ struct MixerConsoleStrip: View {
                     }.tint(.orange)
                         .accessibilityLabel("Mute \(name)").accessibilityIdentifier("\(identifier).mute")
                 }
-                .toggleStyle(.button).controlSize(.small).frame(height: 24)
+                .toggleStyle(.button).frame(minHeight: 24)
                 .disabled(!canEditMix).opacity(presentation.usesProductionMix ? 1 : 0.4)
-                inputGain.frame(height: 96)
+                inputGain.frame(minHeight: textSize.pointSize(forBase: 96))
                 Divider()
                 MixerConsoleRack(presentation: presentation, bus: bus)
                 Divider()
-                pan.frame(height: 96).opacity(presentation.usesProductionMix ? 1 : 0.4)
+                pan.frame(minHeight: textSize.pointSize(forBase: 96)).opacity(presentation.usesProductionMix ? 1 : 0.4)
                 output
             }
             .padding(.horizontal, 10).padding(.top, 8).padding(.bottom, 12)
@@ -103,7 +104,7 @@ struct MixerConsoleStrip: View {
         .help(inputWarning ?? inputDescription)
         .popover(isPresented: $showingInput) {
             VStack(alignment: .leading, spacing: 8) {
-                Text(name).font(.headline)
+                Text(name).wwFont(.headline)
                 Text(inputDescription).textSelection(.enabled)
                 if let inputWarning { Text(inputWarning).foregroundStyle(.red) }
                 if let speaker, let state = presentation.state, let episode = presentation.episode {
@@ -182,11 +183,12 @@ struct MixerConsoleStrip: View {
                 } label: {
                     let peak = levels.map(\.heldPeakDB).max() ?? -.infinity
                     Text(peak.isFinite ? String(format: "%.1f", peak) : "--")
-                        .font(.system(size: 10, weight: .medium)).monospacedDigit()
+                        .font(.system(size: textSize.pointSize(forBase: 10), weight: .medium)).monospacedDigit()
                         .foregroundStyle(levels.contains(where: \.clipped) ? .red : .secondary)
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.plain).accessibilityLabel("Reset held peak and clip indicator")
+                .accessibilityValue(heldPeakValue)
                 .accessibilityIdentifier("\(identifier).peak")
                 .help("Held sample peak in dBFS. Click to reset the peak and latched overload.")
             }
@@ -198,8 +200,14 @@ struct MixerConsoleStrip: View {
                                       sourceAudition: !presentation.usesProductionMix,
                                       identifier: "\(identifier).level")
             }
-            Text("dB / dBFS").font(.system(size: 9)).foregroundStyle(.secondary)
+            Text("dB / dBFS").wwFont(.caption).foregroundStyle(.secondary)
         }
+    }
+
+    private var heldPeakValue: String {
+        let peak = levels.map(\.heldPeakDB).max() ?? -.infinity
+        let measurement = peak.isFinite ? String(format: "Held peak %.1f dBFS", peak) : "No held peak measurement"
+        return measurement + (levels.contains(where: \.clipped) ? "; clipping latched" : "; no clipping latched")
     }
 
     private func endEditing() { presentation.state?.store.endCoalescing() }

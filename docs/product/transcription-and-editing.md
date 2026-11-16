@@ -45,6 +45,12 @@ instead of silently moving it.
 Open **Transcript & Review** in the bottom pane or detach it into its own window.
 Select a word or review row to locate its approximate interval on the waveform.
 Double-click a row to audition its current segment.
+Review follows the app's text-size setting. Use **Review Details…** to read the
+selected row's full phrase, status and exact times (or the first row when none is
+selected), including in a narrow pane. Its **Review interval** menu browses the
+filtered reviews without moving the playhead. Footer actions remain available by Tab
+and horizontal scrolling. An operation's recovery message also appears in Review
+when it is detached; selecting a usable interval clears the failure.
 
 New transcripts propose recognized filler words using the configured list
 (by default `um`, `uh`, `erm`, and `er`). **Find Filler Candidates** scans current
@@ -61,6 +67,9 @@ than adding to it. **Use Show Defaults** / **Use App Defaults** restores inherit
 Enter single words separated by commas or new lines, then choose **Apply Words**.
 Matching ignores case and surrounding punctuation. Phrases are not supported;
 an empty override turns off automatic suggestions at that scope.
+Invalid Apply keeps the draft, returns focus to the words field, and exposes
+the correction guidance on that field. Editing clears the old validation error;
+words are not stored until a valid Apply.
 Changing words does not rescan or cut audio. The next transcription or explicit
 **Find Filler Candidates** uses the new words; a scan refreshes pending suggestions
 while retaining reviewed, rejected, adjusted, manual and cut-linked intervals.

@@ -4,6 +4,7 @@ import SwiftUI
 
 @MainActor @Observable
 final class EpisodeReviewPresentation {
+    static let minimumContentSize = NSSize(width: 720, height: 300)
     weak var state: ShowWindowState?
     private(set) var detachedWindow: NSWindowController?
     private(set) var isClosed = false
@@ -23,7 +24,7 @@ final class EpisodeReviewPresentation {
         let window = EpisodeAuxiliaryWindow(contentViewController: hosting)
         window.originatingState = state
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-        window.contentMinSize = NSSize(width: 720, height: 300)
+        window.contentMinSize = Self.minimumContentSize
         window.setContentSize(NSSize(width: 1000, height: 500))
         window.restoreWorkspaceFrame(named: "WaveWrangler.workbench.Review")
         window.tabbingMode = .disallowed
@@ -100,6 +101,12 @@ private final class ReviewWindowController: NSWindowController, NSWindowDelegate
     weak var presentation: EpisodeReviewPresentation?
     override init(window: NSWindow?) { super.init(window: window); window?.delegate = self }
     required init?(coder: NSCoder) { nil }
+
+    func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
+        let minimum = sender.frameRect(forContentRect: NSRect(
+            origin: .zero, size: EpisodeReviewPresentation.minimumContentSize)).size
+        return NSSize(width: max(frameSize.width, minimum.width), height: max(frameSize.height, minimum.height))
+    }
 
     func windowWillClose(_ notification: Notification) {
         if let window = notification.object as? NSWindow { ShowWindowRegistry.unregister(window) }

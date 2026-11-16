@@ -570,7 +570,7 @@ final class AlignmentInspectionUITests: XCTestCase {
     }
 
     private func showSidebar(_ activity: String) {
-        let toggle = app.buttons["ww.sidebar.\(activity)"]
+        let toggle = app.buttons[activity == "alignment" ? "ww.alignment.toggle" : "ww.sidebar.\(activity)"]
         XCTAssertTrue(toggle.waitForExistence(timeout: 5), "The \(activity) activity toggle must be exposed")
         if toggle.value as? String != "Shown" { toggle.click() }
         XCTAssertTrue(waitForValue("Shown", in: toggle), "The \(activity) sidebar must be active")
